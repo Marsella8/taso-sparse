@@ -14,11 +14,23 @@ module IR.IR
   , ActiModeTerm(..)
   , ScalarTerm(..)
   , Expr(..)
-  , CommutativePair(..)
-  , Equation(..)
+  , Graph(..)
+  , mkGraph
+  , graphBindings
+  , graphFreeVars
+  , graphOutputVars
+  , Bimap
+  , mkBimap
+  , Rewrite(..)
   ) where
 
+import Control.Monad (guard)
+import qualified Data.Bimap as Bi
 import Data.List (intercalate)
+import qualified Data.Map.Strict as Map
+import Data.Map.Strict (Map)
+import qualified Data.Set as Set
+import Data.Set (Set)
 
 data Sort
   = TensorSort
@@ -66,8 +78,6 @@ newtype Axis = Axis Int
 newtype Scalar = Scalar Int
   deriving (Eq, Ord, Read)
 
----
-
 data Stride2DTerm
   = Stride2DVar Var
   | Stride2DLit Stride2D
@@ -99,55 +109,74 @@ data ScalarTerm
   | ScalarMul ScalarTerm ScalarTerm
   deriving (Eq, Ord, Read)
 
----
-
+-- Shallow expressions: operator inputs are variable references only.
 data Expr
-  = VarE Var
-  | Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Expr Expr
-  | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Expr
-  | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Expr
-  | Relu Expr
-  | Sigmoid Expr
-  | Tanh Expr
-  | MatMul Expr Expr
-  | EwAdd Expr Expr
-  | EwMul Expr Expr
-  | Mul Expr ScalarTerm
-  | Transpose Expr
-  | Concat AxisTerm Expr Expr
-  | Split0 AxisTerm Expr
-  | Split1 AxisTerm Expr
-  | Enlarge Kernel2DTerm Expr
+  = Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Var Var
+  | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Var
+  | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Var
+  | Relu Var
+  | Sigmoid Var
+  | Tanh Var
+  | MatMul Var Var
+  | EwAdd Var Var
+  | EwMul Var Var
+  | Mul Var ScalarTerm
+  | Transpose Var
+  | Concat AxisTerm Var Var
+  | Split0 AxisTerm Var
+  | Split1 AxisTerm Var
+  | Enlarge Kernel2DTerm Var
   | ConstPool Kernel2DTerm
   | ConstIConv Kernel2DTerm
   | ConstImm
   | ConstOne
   deriving (Eq, Ord, Read)
 
-data CommutativePair a = CommutativePair a a
-  deriving (Read)
-
-instance Eq a => Eq (CommutativePair a) where
-  CommutativePair a b == CommutativePair c d =
-    (a == c && b == d) || (a == d && b == c)
-
-instance Ord a => Ord (CommutativePair a) where
-  compare (CommutativePair a b) (CommutativePair c d) =
-    compare (canon a b) (canon c d)
-    where
-      canon x y = if x <= y then (x, y) else (y, x)
-
-newtype Equation = Equation (CommutativePair Expr)
-  deriving (Eq, Ord, Read)
-
-data Rewrite = Rewrite {
-  rewriteLhs :: Expr,
-  rewriteRhs :: Expr
+newtype Graph = Graph
+  { graphMap :: Map Var Expr
   }
   deriving (Eq, Ord, Read)
 
-instance Show Rewrite where
-  show (Rewrite lhs rhs) = show lhs ++ " -> " ++ show rhs
+mkGraph :: [(Var, Expr)] -> Maybe Graph
+mkGraph bindings = do
+  guard (allUnique (map fst bindings))
+  Just (Graph (Map.fromList bindings))
+
+graphBindings :: Graph -> [(Var, Expr)]
+graphBindings (Graph m) = Map.toAscList m
+
+graphFreeVars :: Graph -> Set Var
+graphFreeVars (Graph m) =
+  referenced Set.\\ assigned
+  where
+    assigned = Map.keysSet m
+    referenced = Set.unions (map exprVars (Map.elems m))
+
+graphOutputVars :: Graph -> Set Var
+graphOutputVars (Graph m) =
+  assigned Set.\\ usedByOthers
+  where
+    assigned = Map.keysSet m
+    usedByOthers = Set.unions (map exprVars (Map.elems m)) `Set.intersection` assigned
+
+type Bimap = Bi.Bimap Var Var
+
+mkBimap :: [(Var, Var)] -> Maybe Bimap
+mkBimap pairs = do
+  guard (all (\(l, r) -> varSort l == varSort r) pairs)
+  guard (allUnique (map fst pairs))
+  guard (allUnique (map snd pairs))
+  let bm = Bi.fromList pairs
+  guard (Bi.size bm == length pairs)
+  Just bm
+
+data Rewrite = Rewrite
+  { src :: Graph
+  , dst :: Graph
+  , inputMap :: Bimap
+  , outputMap :: Bimap
+  }
+  deriving (Eq, Ord)
 
 instance Show Var where
   show (Var name _) = name
@@ -200,11 +229,19 @@ instance Show ScalarTerm where
 instance Show Expr where
   show = prettyExpr
 
-instance Show a => Show (CommutativePair a) where
-  show (CommutativePair a b) = "(" ++ show a ++ ", " ++ show b ++ ")"
+instance Show Graph where
+  show g =
+    "{ " ++ intercalate "; " (map showBinding (graphBindings g)) ++ " }"
+    where
+      showBinding (v, e) = show v ++ " = " ++ show e
 
-instance Show Equation where
-  show (Equation (CommutativePair lhs rhs)) = show lhs ++ " == " ++ show rhs
+instance Show Rewrite where
+  show rw =
+    "rewrite(src=" ++ show (src rw)
+      ++ ", dst=" ++ show (dst rw)
+      ++ ", inputMap=" ++ show (inputMap rw)
+      ++ ", outputMap=" ++ show (outputMap rw)
+      ++ ")"
 
 prettyScalarTerm :: ScalarTerm -> String
 prettyScalarTerm (ScalarVar v) = show v
@@ -215,26 +252,57 @@ prettyScalarTerm (ScalarMul x y) =
 prettyExpr :: Expr -> String
 prettyExpr expr =
   case expr of
-    VarE v -> show v
-    Conv2D k s p c x y -> call "conv2d" [show k, show s, show p, show c, prettyExpr x, prettyExpr y]
-    Pool2DAvg k s p x -> call "pool2d-avg" [show k, show s, show p, prettyExpr x]
-    Pool2DMax k s p x -> call "pool2d-max" [show k, show s, show p, prettyExpr x]
-    Relu x -> call "relu" [prettyExpr x]
-    Sigmoid x -> call "sigmoid" [prettyExpr x]
-    Tanh x -> call "tanh" [prettyExpr x]
-    MatMul x y -> bin " @ " x y
-    EwAdd x y -> bin " + " x y
-    EwMul x y -> bin " .* " x y
-    Mul x y -> "(" ++ prettyExpr x ++ " * " ++ prettyScalarTerm y ++ ")"
-    Transpose x -> call "transpose" [prettyExpr x]
-    Concat a x y -> call "concat" [show a, prettyExpr x, prettyExpr y]
-    Split0 a x -> call "split0" [show a, prettyExpr x]
-    Split1 a x -> call "split1" [show a, prettyExpr x]
-    Enlarge k x -> call "enlarge" [show k, prettyExpr x]
+    Conv2D k s p c x y -> call "conv2d" [show k, show s, show p, show c, show x, show y]
+    Pool2DAvg k s p x -> call "pool2d-avg" [show k, show s, show p, show x]
+    Pool2DMax k s p x -> call "pool2d-max" [show k, show s, show p, show x]
+    Relu x -> call "relu" [show x]
+    Sigmoid x -> call "sigmoid" [show x]
+    Tanh x -> call "tanh" [show x]
+    MatMul x y -> call "matmul" [show x, show y]
+    EwAdd x y -> call "ewadd" [show x, show y]
+    EwMul x y -> call "ewmul" [show x, show y]
+    Mul x y -> call "mul" [show x, prettyScalarTerm y]
+    Transpose x -> call "transpose" [show x]
+    Concat a x y -> call "concat" [show a, show x, show y]
+    Split0 a x -> call "split0" [show a, show x]
+    Split1 a x -> call "split1" [show a, show x]
+    Enlarge k x -> call "enlarge" [show k, show x]
     ConstPool k -> call "const-pool" [show k]
     ConstIConv k -> call "const-iconv" [show k]
     ConstImm -> "const-imm"
     ConstOne -> "const-one"
   where
     call name args = name ++ "(" ++ intercalate ", " args ++ ")"
-    bin op x y = "(" ++ prettyExpr x ++ op ++ prettyExpr y ++ ")"
+
+exprVars :: Expr -> Set Var
+exprVars expr =
+  case expr of
+    Conv2D _ _ _ _ x y -> Set.fromList [x, y]
+    Pool2DAvg _ _ _ x -> Set.singleton x
+    Pool2DMax _ _ _ x -> Set.singleton x
+    Relu x -> Set.singleton x
+    Sigmoid x -> Set.singleton x
+    Tanh x -> Set.singleton x
+    MatMul x y -> Set.fromList [x, y]
+    EwAdd x y -> Set.fromList [x, y]
+    EwMul x y -> Set.fromList [x, y]
+    Mul x s -> Set.insert x (scalarVars s)
+    Transpose x -> Set.singleton x
+    Concat _ x y -> Set.fromList [x, y]
+    Split0 _ x -> Set.singleton x
+    Split1 _ x -> Set.singleton x
+    Enlarge _ x -> Set.singleton x
+    ConstPool _ -> Set.empty
+    ConstIConv _ -> Set.empty
+    ConstImm -> Set.empty
+    ConstOne -> Set.empty
+
+scalarVars :: ScalarTerm -> Set Var
+scalarVars st =
+  case st of
+    ScalarVar v -> Set.singleton v
+    ScalarLit _ -> Set.empty
+    ScalarMul a b -> scalarVars a `Set.union` scalarVars b
+
+allUnique :: Ord a => [a] -> Bool
+allUnique xs = length xs == Set.size (Set.fromList xs)
