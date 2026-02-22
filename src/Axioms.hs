@@ -3,207 +3,65 @@ module Axioms
   , substitutions
   ) where
 
-import Control.Monad.State.Strict (State, get, put, runState)
 import qualified Data.Set as Set
 import Deserialize (load)
 import IR.IR
-import IR.Utils
 import System.IO.Unsafe (unsafePerformIO)
-
-type Builder = State BuildState Var
-
-data BuildState = BuildState
-  { buildPrefix :: String
-  , nextId :: Int
-  , revBindings :: [(Var, Expr)]
-  }
 
 axioms :: [Rewrite]
 axioms =
-  [ -- 1 ewadd_assoc
-    makeRewrite
-      (do t0 <- ewadd y z; ewadd x t0)
-      (do t0 <- ewadd x y; ewadd t0 z)
-    -- 2 ewadd_comm
-  , makeRewrite
-      (ewadd x y)
-      (ewadd y x)
-    -- 3 ewmul_assoc
-  , makeRewrite
-      (do t0 <- ewmul y z; ewmul x t0)
-      (do t0 <- ewmul x y; ewmul t0 z)
-    -- 4 ewmul_comm
-  , makeRewrite
-      (ewmul x y)
-      (ewmul y x)
-    -- 5 ewmul_ewadd_distrib
-  , makeRewrite
-      (do t0 <- ewadd x y; ewmul t0 z)
-      (do t0 <- ewmul x z; t1 <- ewmul y z; ewadd t0 t1)
-    -- 6 smul_assoc
-  , makeRewrite
-      (do t0 <- mul x scY; mul t0 scW)
-      (mul x (ScalarMul scY scW))
-    -- 7 smul_ewadd_distrib
-  , makeRewrite
-      (do t0 <- ewadd x y; mul t0 scW)
-      (do t0 <- mul x scW; t1 <- mul y scW; ewadd t0 t1)
-    -- 8 smul_ewmul_comm
-  , makeRewrite
-      (do t0 <- ewmul x y; mul t0 scW)
-      (do t0 <- mul y scW; ewmul x t0)
-    -- 9 transpose_involution
-  , makeRewrite
-      (do t0 <- transpose x; transpose t0)
-      (pure x)
-    -- 10 transpose_ewadd
-  , makeRewrite
-      (do t0 <- ewadd x y; transpose t0)
-      (do t0 <- transpose x; t1 <- transpose y; ewadd t0 t1)
-    -- 11 transpose_ewmul
-  , makeRewrite
-      (do t0 <- ewmul x y; transpose t0)
-      (do t0 <- transpose x; t1 <- transpose y; ewmul t0 t1)
-    -- 12 smul_transpose
-  , makeRewrite
-      (do t0 <- transpose x; mul t0 scW)
-      (do t0 <- mul x scW; transpose t0)
-    -- 13 matmul_assoc
-  , makeRewrite
-      (do t0 <- matmul y z; matmul x t0)
-      (do t0 <- matmul x y; matmul t0 z)
-    -- 14 smul_matmul
-  , makeRewrite
-      (do t0 <- matmul x y; mul t0 scW)
-      (do t0 <- mul y scW; matmul x t0)
-    -- 15 matmul_ewadd
-  , makeRewrite
-      (do t0 <- ewadd y z; matmul x t0)
-      (do t0 <- matmul x y; t1 <- matmul x z; ewadd t0 t1)
-    -- 16 transpose_matmul
-  , makeRewrite
-      (do t0 <- matmul x y; transpose t0)
-      (do t0 <- transpose y; t1 <- transpose x; matmul t0 t1)
-    -- 17 conv_bilinear_scale_shift
-  , makeRewrite
-      (do t0 <- mul x scW; conv2d k s p c t0 y)
-      (do t0 <- mul y scW; conv2d k s p c x t0)
-    -- 18 conv_none_smul_out
-  , makeRewrite
-      (do t0 <- conv2d k s p actNone x y; mul t0 scW)
-      (do t0 <- mul x scW; conv2d k s p actNone t0 y)
-    -- 19 conv_none_linear_kernel
-  , makeRewrite
-      (do t0 <- ewadd y z; conv2d k s p actNone x t0)
-      (do t0 <- conv2d k s p actNone x y; t1 <- conv2d k s p actNone x z; ewadd t0 t1)
-    -- 20 conv_none_linear_input
-  , makeRewrite
-      (do t0 <- ewadd x y; conv2d k s p actNone t0 z)
-      (do t0 <- conv2d k s p actNone x z; t1 <- conv2d k s p actNone y z; ewadd t0 t1)
-    -- 21 conv_same_enlarge_kernel
-  , makeRewrite
-      (conv2d k s padSame c x y)
-      (do t0 <- enlarge k y; conv2d k s padSame c x t0)
-    -- 22 conv_relu_def
-  , makeRewrite
-      (conv2d k s p actRelu x y)
-      (do t0 <- conv2d k s p actNone x y; relu t0)
-    -- 23 relu_transpose
-  , makeRewrite
-      (do t0 <- transpose x; relu t0)
-      (do t0 <- relu x; transpose t0)
-    -- 24 conv_const_pool
-  , makeRewrite
-      (do t0 <- constPool k; conv2d k s p actNone x t0)
-      (pool2dAvg k s p x)
-    -- 25 conv_const_iconv_identity
-  , makeRewrite
-      (do t0 <- constIConv k; conv2d k stride11 padSame actNone x t0)
-      (pure x)
-    -- 26 matmul_const_imm_identity
-  , makeRewrite
-      (do t0 <- constImm; matmul x t0)
-      (pure x)
-    -- 27 ewmul_const_one_identity
-  , makeRewrite
-      (do t0 <- constOne; ewmul x t0)
-      (pure x)
-    -- 28 split0_concat
-  , makeRewrite
-      (do t0 <- concat' a x y; split0 a t0)
-      (pure x)
-    -- 29 split1_concat
-  , makeRewrite
-      (do t0 <- concat' a x y; split1 a t0)
-      (pure y)
-    -- 30 concat_geometry
-  , makeRewrite
-      (do t0 <- concat' axis1 x y; t1 <- concat' axis1 z w; concat' axis0 t0 t1)
-      (do t0 <- concat' axis0 x z; t1 <- concat' axis0 y w; concat' axis1 t0 t1)
-    -- 31 concat_smul
-  , makeRewrite
-      (do t0 <- mul x scW; t1 <- mul y scW; concat' a t0 t1)
-      (do t0 <- concat' a x y; mul t0 scW)
-    -- 32 concat_ewadd
-  , makeRewrite
-      (do t0 <- ewadd x y; t1 <- ewadd z w; concat' a t0 t1)
-      (do t0 <- concat' a x z; t1 <- concat' a y w; ewadd t0 t1)
-    -- 33 concat_ewmul
-  , makeRewrite
-      (do t0 <- ewmul x y; t1 <- ewmul z w; concat' a t0 t1)
-      (do t0 <- concat' a x z; t1 <- concat' a y w; ewmul t0 t1)
-    -- 34 concat_relu
-  , makeRewrite
-      (do t0 <- relu x; t1 <- relu y; concat' a t0 t1)
-      (do t0 <- concat' a x y; relu t0)
-    -- 35 concat_transpose
-  , makeRewrite
-      (do t0 <- transpose x; t1 <- transpose y; concat' axis1 t0 t1)
-      (do t0 <- concat' axis0 x y; transpose t0)
-    -- 36 concat_matmul_right
-  , makeRewrite
-      (do t0 <- matmul x y; t1 <- matmul x z; concat' axis1 t0 t1)
-      (do t0 <- concat' axis1 y z; matmul x t0)
-    -- 37 matmul_concat_bilinear
-  , makeRewrite
-      (do t0 <- concat' axis1 x z; t1 <- concat' axis0 y w; matmul t0 t1)
-      (do t0 <- matmul x y; t1 <- matmul z w; ewadd t0 t1)
-    -- 38 concat_conv_axis0
-  , makeRewrite
-      (do t0 <- conv2d k s p c x z; t1 <- conv2d k s p c y z; concat' axis0 t0 t1)
-      (do t0 <- concat' axis0 x y; conv2d k s p c t0 z)
-    -- 39 concat_conv_axis1
-  , makeRewrite
-      (do t0 <- conv2d k s p c x y; t1 <- conv2d k s p c x z; concat' axis1 t0 t1)
-      (do t0 <- concat' axis0 y z; conv2d k s p c x t0)
-    -- 40 conv_none_concat_bilinear
-  , makeRewrite
-      (do t0 <- concat' axis1 x z; t1 <- concat' axis1 y w; conv2d k s p actNone t0 t1)
-      (do t0 <- conv2d k s p actNone x y; t1 <- conv2d k s p actNone z w; ewadd t0 t1)
-    -- 41 concat_poolavg_axis1
-  , makeRewrite
-      (do t0 <- pool2dAvg k s p x; t1 <- pool2dAvg k s p y; concat' axis1 t0 t1)
-      (do t0 <- concat' axis1 x y; pool2dAvg k s p t0)
-    -- 42 concat_poolmax_axis0
-  , makeRewrite
-      (do t0 <- pool2dMax k s p x; t1 <- pool2dMax k s p y; concat' axis0 t0 t1)
-      (do t0 <- concat' axis0 x y; pool2dMax k s p t0)
-    -- 43 concat_poolmax_axis1
-  , makeRewrite
-      (do t0 <- pool2dMax k s p x; t1 <- pool2dMax k s p y; concat' axis1 t0 t1)
-      (do t0 <- concat' axis1 x y; pool2dMax k s p t0)
-    -- 44 extra, not in the paper but in the code. const_iconv_to_const_pool
-  , makeRewrite
-      (do t0 <- constIConv k; pool2dAvg k stride11 padSame t0)
-      (constPool k)
+  [ axiom1
+  , axiom2
+  , axiom3
+  , axiom4
+  , axiom5
+  , axiom6
+  , axiom7
+  , axiom8
+  , axiom9
+  , axiom10
+  , axiom11
+  , axiom12
+  , axiom13
+  , axiom14
+  , axiom15
+  , axiom16
+  , axiom17
+  , axiom18
+  , axiom19
+  , axiom20
+  , axiom21
+  , axiom22
+  , axiom23
+  , axiom24
+  , axiom25
+  , axiom26
+  , axiom27
+  , axiom28
+  , axiom29
+  , axiom30
+  , axiom31
+  , axiom32
+  , axiom33
+  , axiom34
+  , axiom35
+  , axiom36
+  , axiom37
+  , axiom38
+  , axiom39
+  , axiom40
+  , axiom41
+  , axiom42
+  , axiom43
+  , axiom44
   ]
 
 substitutions :: [Rewrite]
 substitutions = unsafePerformIO (load "data/substitutions.sexp")
 {-# NOINLINE substitutions #-}
 
-makeRewrite :: Builder -> Builder -> Rewrite
-makeRewrite lhsBuilder rhsBuilder =
+mkRewrite :: [(Var, Expr)] -> Var -> [(Var, Expr)] -> Var -> Rewrite
+mkRewrite srcBindings srcOut dstBindings dstOut =
   Rewrite
     { src = srcGraph
     , dst = dstGraph
@@ -211,25 +69,10 @@ makeRewrite lhsBuilder rhsBuilder =
     , outputMap = mustBimap [(srcOut, dstOut)]
     }
   where
-    (srcGraph, srcOut) = buildGraph "s_t" lhsBuilder
-    (dstGraph, dstOut) = buildGraph "d_t" rhsBuilder
-    sharedInputs =
-      graphFreeVars srcGraph `Set.intersection` graphFreeVars dstGraph
+    srcGraph = mustGraph srcBindings
+    dstGraph = mustGraph dstBindings
+    sharedInputs = graphFreeVars srcGraph `Set.intersection` graphFreeVars dstGraph
     inputPairs = [(v, v) | v <- Set.toAscList sharedInputs]
-
-buildGraph :: String -> Builder -> (Graph, Var)
-buildGraph prefix builder =
-  let st0 = BuildState prefix 0 []
-      (root, st1) = runState builder st0
-   in (mustGraph (reverse (revBindings st1)), root)
-
-emit :: Expr -> Builder
-emit expr = do
-  st <- get
-  let i = nextId st
-      v = Var (buildPrefix st ++ show i) TensorSort
-  put st {nextId = i + 1, revBindings = (v, expr) : revBindings st}
-  pure v
 
 mustGraph :: [(Var, Expr)] -> Graph
 mustGraph bindings =
@@ -243,53 +86,608 @@ mustBimap pairs =
     Just bm -> bm
     Nothing -> error "Invalid bimap while building axioms"
 
-conv2d :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> ActiModeTerm -> Var -> Var -> Builder
-conv2d k' s' p' a' x' y' = emit (Conv2D k' s' p' a' x' y')
+s0 :: Var
+s0 = t "s_t0"
 
-pool2dAvg :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> Var -> Builder
-pool2dAvg k' s' p' x' = emit (Pool2DAvg k' s' p' x')
+s1 :: Var
+s1 = t "s_t1"
 
-pool2dMax :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> Var -> Builder
-pool2dMax k' s' p' x' = emit (Pool2DMax k' s' p' x')
+s2 :: Var
+s2 = t "s_t2"
 
-relu :: Var -> Builder
-relu x' = emit (Relu x')
+d0 :: Var
+d0 = t "d_t0"
 
-matmul :: Var -> Var -> Builder
-matmul x' y' = emit (MatMul x' y')
+d1 :: Var
+d1 = t "d_t1"
 
-ewadd :: Var -> Var -> Builder
-ewadd x' y' = emit (EwAdd x' y')
+d2 :: Var
+d2 = t "d_t2"
 
-ewmul :: Var -> Var -> Builder
-ewmul x' y' = emit (EwMul x' y')
+t :: String -> Var
+t name = Var name TensorSort
 
-mul :: Var -> ScalarTerm -> Builder
-mul x' s' = emit (Mul x' s')
+x :: Var
+x = t "x"
 
-transpose :: Var -> Builder
-transpose x' = emit (Transpose x')
+y :: Var
+y = t "y"
 
-concat' :: AxisTerm -> Var -> Var -> Builder
-concat' a' x' y' = emit (Concat a' x' y')
+z :: Var
+z = t "z"
 
-split0 :: AxisTerm -> Var -> Builder
-split0 a' x' = emit (Split0 a' x')
+w :: Var
+w = t "w"
 
-split1 :: AxisTerm -> Var -> Builder
-split1 a' x' = emit (Split1 a' x')
+k :: Kernel2DTerm
+k = Kernel2DVar (Var "k" Kernel2DSort)
 
-enlarge :: Kernel2DTerm -> Var -> Builder
-enlarge k' x' = emit (Enlarge k' x')
+stride :: Stride2DTerm
+stride = Stride2DVar (Var "s" Stride2DSort)
 
-constPool :: Kernel2DTerm -> Builder
-constPool k' = emit (ConstPool k')
+p :: PadModeTerm
+p = PadModeVar (Var "p" PadModeSort)
 
-constIConv :: Kernel2DTerm -> Builder
-constIConv k' = emit (ConstIConv k')
+c :: ActiModeTerm
+c = ActiModeVar (Var "c" ActiModeSort)
 
-constImm :: Builder
-constImm = emit ConstImm
+a :: AxisTerm
+a = AxisVar (Var "a" AxisSort)
 
-constOne :: Builder
-constOne = emit ConstOne
+scW :: ScalarTerm
+scW = ScalarVar (Var "w" ScalarSort)
+
+scY :: ScalarTerm
+scY = ScalarVar (Var "y" ScalarSort)
+
+axis0 :: AxisTerm
+axis0 = AxisLit (Axis 0)
+
+axis1 :: AxisTerm
+axis1 = AxisLit (Axis 1)
+
+padSame :: PadModeTerm
+padSame = PadModeLit PadSame
+
+actNone :: ActiModeTerm
+actNone = ActiModeLit ActNone
+
+actRelu :: ActiModeTerm
+actRelu = ActiModeLit ActRelu
+
+stride11 :: Stride2DTerm
+stride11 = Stride2DLit (Stride2D 1 1)
+
+axiom1 :: Rewrite
+axiom1 =
+  mkRewrite
+    [ (s0, EwAdd y z)
+    , (s1, EwAdd x (s0))
+    ]
+    (s1)
+    [ (d0, EwAdd x y)
+    , (d1, EwAdd (d0) z)
+    ]
+    (d1)
+
+axiom2 :: Rewrite
+axiom2 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    ]
+    (s0)
+    [ (d0, EwAdd y x)
+    ]
+    (d0)
+
+axiom3 :: Rewrite
+axiom3 =
+  mkRewrite
+    [ (s0, EwMul y z)
+    , (s1, EwMul x (s0))
+    ]
+    (s1)
+    [ (d0, EwMul x y)
+    , (d1, EwMul (d0) z)
+    ]
+    (d1)
+
+axiom4 :: Rewrite
+axiom4 =
+  mkRewrite
+    [ (s0, EwMul x y)
+    ]
+    (s0)
+    [ (d0, EwMul y x)
+    ]
+    (d0)
+
+axiom5 :: Rewrite
+axiom5 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    , (s1, EwMul (s0) z)
+    ]
+    (s1)
+    [ (d0, EwMul x z)
+    , (d1, EwMul y z)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom6 :: Rewrite
+axiom6 =
+  mkRewrite
+    [ (s0, Mul x scY)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul x (ScalarMul scY scW))
+    ]
+    (d0)
+
+axiom7 :: Rewrite
+axiom7 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul x scW)
+    , (d1, Mul y scW)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom8 :: Rewrite
+axiom8 =
+  mkRewrite
+    [ (s0, EwMul x y)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul y scW)
+    , (d1, EwMul x (d0))
+    ]
+    (d1)
+
+axiom9 :: Rewrite
+axiom9 =
+  mkRewrite
+    [ (s0, Transpose x)
+    , (s1, Transpose (s0))
+    ]
+    (s1)
+    []
+    x
+
+axiom10 :: Rewrite
+axiom10 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    , (s1, Transpose (s0))
+    ]
+    (s1)
+    [ (d0, Transpose x)
+    , (d1, Transpose y)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom11 :: Rewrite
+axiom11 =
+  mkRewrite
+    [ (s0, EwMul x y)
+    , (s1, Transpose (s0))
+    ]
+    (s1)
+    [ (d0, Transpose x)
+    , (d1, Transpose y)
+    , (d2, EwMul (d0) (d1))
+    ]
+    (d2)
+
+axiom12 :: Rewrite
+axiom12 =
+  mkRewrite
+    [ (s0, Transpose x)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul x scW)
+    , (d1, Transpose (d0))
+    ]
+    (d1)
+
+axiom13 :: Rewrite
+axiom13 =
+  mkRewrite
+    [ (s0, MatMul y z)
+    , (s1, MatMul x (s0))
+    ]
+    (s1)
+    [ (d0, MatMul x y)
+    , (d1, MatMul (d0) z)
+    ]
+    (d1)
+
+axiom14 :: Rewrite
+axiom14 =
+  mkRewrite
+    [ (s0, MatMul x y)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul y scW)
+    , (d1, MatMul x (d0))
+    ]
+    (d1)
+
+axiom15 :: Rewrite
+axiom15 =
+  mkRewrite
+    [ (s0, EwAdd y z)
+    , (s1, MatMul x (s0))
+    ]
+    (s1)
+    [ (d0, MatMul x y)
+    , (d1, MatMul x z)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom16 :: Rewrite
+axiom16 =
+  mkRewrite
+    [ (s0, MatMul x y)
+    , (s1, Transpose (s0))
+    ]
+    (s1)
+    [ (d0, Transpose y)
+    , (d1, Transpose x)
+    , (d2, MatMul (d0) (d1))
+    ]
+    (d2)
+
+axiom17 :: Rewrite
+axiom17 =
+  mkRewrite
+    [ (s0, Mul x scW)
+    , (s1, Conv2D k stride p c (s0) y)
+    ]
+    (s1)
+    [ (d0, Mul y scW)
+    , (d1, Conv2D k stride p c x (d0))
+    ]
+    (d1)
+
+axiom18 :: Rewrite
+axiom18 =
+  mkRewrite
+    [ (s0, Conv2D k stride p actNone x y)
+    , (s1, Mul (s0) scW)
+    ]
+    (s1)
+    [ (d0, Mul x scW)
+    , (d1, Conv2D k stride p actNone (d0) y)
+    ]
+    (d1)
+
+axiom19 :: Rewrite
+axiom19 =
+  mkRewrite
+    [ (s0, EwAdd y z)
+    , (s1, Conv2D k stride p actNone x (s0))
+    ]
+    (s1)
+    [ (d0, Conv2D k stride p actNone x y)
+    , (d1, Conv2D k stride p actNone x z)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom20 :: Rewrite
+axiom20 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    , (s1, Conv2D k stride p actNone (s0) z)
+    ]
+    (s1)
+    [ (d0, Conv2D k stride p actNone x z)
+    , (d1, Conv2D k stride p actNone y z)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom21 :: Rewrite
+axiom21 =
+  mkRewrite
+    [ (s0, Conv2D k stride padSame c x y)
+    ]
+    (s0)
+    [ (d0, Enlarge k y)
+    , (d1, Conv2D k stride padSame c x (d0))
+    ]
+    (d1)
+
+axiom22 :: Rewrite
+axiom22 =
+  mkRewrite
+    [ (s0, Conv2D k stride p actRelu x y)
+    ]
+    (s0)
+    [ (d0, Conv2D k stride p actNone x y)
+    , (d1, Relu (d0))
+    ]
+    (d1)
+
+axiom23 :: Rewrite
+axiom23 =
+  mkRewrite
+    [ (s0, Transpose x)
+    , (s1, Relu (s0))
+    ]
+    (s1)
+    [ (d0, Relu x)
+    , (d1, Transpose (d0))
+    ]
+    (d1)
+
+axiom24 :: Rewrite
+axiom24 =
+  mkRewrite
+    [ (s0, ConstPool k)
+    , (s1, Conv2D k stride p actNone x (s0))
+    ]
+    (s1)
+    [ (d0, Pool2DAvg k stride p x)
+    ]
+    (d0)
+
+axiom25 :: Rewrite
+axiom25 =
+  mkRewrite
+    [ (s0, ConstIConv k)
+    , (s1, Conv2D k stride11 padSame actNone x (s0))
+    ]
+    (s1)
+    []
+    x
+
+axiom26 :: Rewrite
+axiom26 =
+  mkRewrite
+    [ (s0, ConstImm)
+    , (s1, MatMul x (s0))
+    ]
+    (s1)
+    []
+    x
+
+axiom27 :: Rewrite
+axiom27 =
+  mkRewrite
+    [ (s0, ConstOne)
+    , (s1, EwMul x (s0))
+    ]
+    (s1)
+    []
+    x
+
+axiom28 :: Rewrite
+axiom28 =
+  mkRewrite
+    [ (s0, Concat a x y)
+    , (s1, Split0 a (s0))
+    ]
+    (s1)
+    []
+    x
+
+axiom29 :: Rewrite
+axiom29 =
+  mkRewrite
+    [ (s0, Concat a x y)
+    , (s1, Split1 a (s0))
+    ]
+    (s1)
+    []
+    y
+
+axiom30 :: Rewrite
+axiom30 =
+  mkRewrite
+    [ (s0, Concat axis1 x y)
+    , (s1, Concat axis1 z w)
+    , (s2, Concat axis0 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis0 x z)
+    , (d1, Concat axis0 y w)
+    , (d2, Concat axis1 (d0) (d1))
+    ]
+    (d2)
+
+axiom31 :: Rewrite
+axiom31 =
+  mkRewrite
+    [ (s0, Mul x scW)
+    , (s1, Mul y scW)
+    , (s2, Concat a (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat a x y)
+    , (d1, Mul (d0) scW)
+    ]
+    (d1)
+
+axiom32 :: Rewrite
+axiom32 =
+  mkRewrite
+    [ (s0, EwAdd x y)
+    , (s1, EwAdd z w)
+    , (s2, Concat a (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat a x z)
+    , (d1, Concat a y w)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom33 :: Rewrite
+axiom33 =
+  mkRewrite
+    [ (s0, EwMul x y)
+    , (s1, EwMul z w)
+    , (s2, Concat a (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat a x z)
+    , (d1, Concat a y w)
+    , (d2, EwMul (d0) (d1))
+    ]
+    (d2)
+
+axiom34 :: Rewrite
+axiom34 =
+  mkRewrite
+    [ (s0, Relu x)
+    , (s1, Relu y)
+    , (s2, Concat a (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat a x y)
+    , (d1, Relu (d0))
+    ]
+    (d1)
+
+axiom35 :: Rewrite
+axiom35 =
+  mkRewrite
+    [ (s0, Transpose x)
+    , (s1, Transpose y)
+    , (s2, Concat axis1 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis0 x y)
+    , (d1, Transpose (d0))
+    ]
+    (d1)
+
+axiom36 :: Rewrite
+axiom36 =
+  mkRewrite
+    [ (s0, MatMul x y)
+    , (s1, MatMul x z)
+    , (s2, Concat axis1 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis1 y z)
+    , (d1, MatMul x (d0))
+    ]
+    (d1)
+
+axiom37 :: Rewrite
+axiom37 =
+  mkRewrite
+    [ (s0, Concat axis1 x z)
+    , (s1, Concat axis0 y w)
+    , (s2, MatMul (s0) (s1))
+    ]
+    (s2)
+    [ (d0, MatMul x y)
+    , (d1, MatMul z w)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom38 :: Rewrite
+axiom38 =
+  mkRewrite
+    [ (s0, Conv2D k stride p c x z)
+    , (s1, Conv2D k stride p c y z)
+    , (s2, Concat axis0 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis0 x y)
+    , (d1, Conv2D k stride p c (d0) z)
+    ]
+    (d1)
+
+axiom39 :: Rewrite
+axiom39 =
+  mkRewrite
+    [ (s0, Conv2D k stride p c x y)
+    , (s1, Conv2D k stride p c x z)
+    , (s2, Concat axis1 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis0 y z)
+    , (d1, Conv2D k stride p c x (d0))
+    ]
+    (d1)
+
+axiom40 :: Rewrite
+axiom40 =
+  mkRewrite
+    [ (s0, Concat axis1 x z)
+    , (s1, Concat axis1 y w)
+    , (s2, Conv2D k stride p actNone (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Conv2D k stride p actNone x y)
+    , (d1, Conv2D k stride p actNone z w)
+    , (d2, EwAdd (d0) (d1))
+    ]
+    (d2)
+
+axiom41 :: Rewrite
+axiom41 =
+  mkRewrite
+    [ (s0, Pool2DAvg k stride p x)
+    , (s1, Pool2DAvg k stride p y)
+    , (s2, Concat axis1 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis1 x y)
+    , (d1, Pool2DAvg k stride p (d0))
+    ]
+    (d1)
+
+axiom42 :: Rewrite
+axiom42 =
+  mkRewrite
+    [ (s0, Pool2DMax k stride p x)
+    , (s1, Pool2DMax k stride p y)
+    , (s2, Concat axis0 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis0 x y)
+    , (d1, Pool2DMax k stride p (d0))
+    ]
+    (d1)
+
+axiom43 :: Rewrite
+axiom43 =
+  mkRewrite
+    [ (s0, Pool2DMax k stride p x)
+    , (s1, Pool2DMax k stride p y)
+    , (s2, Concat axis1 (s0) (s1))
+    ]
+    (s2)
+    [ (d0, Concat axis1 x y)
+    , (d1, Pool2DMax k stride p (d0))
+    ]
+    (d1)
+
+axiom44 :: Rewrite
+axiom44 =
+  mkRewrite
+    [ (s0, ConstIConv k)
+    , (s1, Pool2DAvg k stride11 padSame (s0))
+    ]
+    (s1)
+    [ (d0, ConstPool k)
+    ]
+    (d0)
