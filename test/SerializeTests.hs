@@ -22,8 +22,8 @@ runSerializeTests = do
 
   assertEq
     "serialize: conv2d mixed params"
-    "(conv2d (var s stride2d) same relu (var x tensor) (var y tensor))"
-    (renderSExpr (toSExpr (Conv2D s padSame actRelu x y)))
+    "(conv2d (var k kernel2d) (var s stride2d) same relu (var x tensor) (var y tensor))"
+    (renderSExpr (toSExpr (Conv2D k s padSame actRelu x y)))
 
   assertEq
     "serialize: scalar literal"
@@ -31,13 +31,13 @@ runSerializeTests = do
     (renderSExpr (toSExpr (Mul x (ScalarLit (Scalar 3)))))
 
   let bigExpr =
-        Conv2D s p c
+        Conv2D k s p c
           (Concat axis0 (MatMul x y) (MatMul x z))
           (Enlarge k (ConstPool k))
 
   assertEq
     "serialize: composed expr"
-    "(conv2d (var s stride2d) (var p padmode) (var c actimode) (concat (axis 0) (matmul (var x tensor) (var y tensor)) (matmul (var x tensor) (var z tensor))) (enlarge (var k kernel2d) (const-pool (var k kernel2d))))"
+    "(conv2d (var k kernel2d) (var s stride2d) (var p padmode) (var c actimode) (concat (axis 0) (matmul (var x tensor) (var y tensor)) (matmul (var x tensor) (var z tensor))) (enlarge (var k kernel2d) (const-pool (var k kernel2d))))"
     (renderSExpr (toSExpr bigExpr))
 
   assertEq
@@ -49,4 +49,3 @@ runSerializeTests = do
     "serialize: all axioms"
     44
     (length (map (renderSExpr . toSExpr) axioms))
-

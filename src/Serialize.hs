@@ -90,7 +90,7 @@ instance SExprSerialize ScalarTerm where
 
 instance SExprSerialize Expr where
   toSExpr (VarE v) = toSExpr v
-  toSExpr (Conv2D s p a x y) = list [atom "conv2d", toSExpr s, toSExpr p, toSExpr a, toSExpr x, toSExpr y]
+  toSExpr (Conv2D k s p a x y) = list [atom "conv2d", toSExpr k, toSExpr s, toSExpr p, toSExpr a, toSExpr x, toSExpr y]
   toSExpr (Pool2DAvg k s p x) = list [atom "pool2d-avg", toSExpr k, toSExpr s, toSExpr p, toSExpr x]
   toSExpr (Pool2DMax k s p x) = list [atom "pool2d-max", toSExpr k, toSExpr s, toSExpr p, toSExpr x]
   toSExpr (Relu x) = list [atom "relu", toSExpr x]

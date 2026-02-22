@@ -76,39 +76,39 @@ axioms =
       (MatMul (Transpose y) (Transpose x))
     -- 17 conv_bilinear_scale_shift
   , makeEq
-      (Conv2D s p c (Mul x scW) y)
-      (Conv2D s p c x (Mul y scW))
+      (Conv2D k s p c (Mul x scW) y)
+      (Conv2D k s p c x (Mul y scW))
     -- 18 conv_none_smul_out
   , makeEq
-      (Mul (Conv2D s p actNone x y) scW)
-      (Conv2D s p actNone (Mul x scW) y)
+      (Mul (Conv2D k s p actNone x y) scW)
+      (Conv2D k s p actNone (Mul x scW) y)
     -- 19 conv_none_linear_kernel
   , makeEq
-      (Conv2D s p actNone x (EwAdd y z))
-      (EwAdd (Conv2D s p actNone x y) (Conv2D s p actNone x z))
+      (Conv2D k s p actNone x (EwAdd y z))
+      (EwAdd (Conv2D k s p actNone x y) (Conv2D k s p actNone x z))
     -- 20 conv_none_linear_input
   , makeEq
-      (Conv2D s p actNone (EwAdd x y) z)
-      (EwAdd (Conv2D s p actNone x z) (Conv2D s p actNone y z))
+      (Conv2D k s p actNone (EwAdd x y) z)
+      (EwAdd (Conv2D k s p actNone x z) (Conv2D k s p actNone y z))
     -- 21 conv_same_enlarge_kernel
   , makeEq
-      (Conv2D s padSame c x y)
-      (Conv2D s padSame c x (Enlarge k y))
+      (Conv2D k s padSame c x y)
+      (Conv2D k s padSame c x (Enlarge k y))
     -- 22 conv_relu_def
   , makeEq
-      (Conv2D s p actRelu x y)
-      (Relu (Conv2D s p actNone x y))
+      (Conv2D k s p actRelu x y)
+      (Relu (Conv2D k s p actNone x y))
     -- 23 relu_transpose
   , makeEq
       (Relu (Transpose x))
       (Transpose (Relu x))
     -- 24 conv_const_pool
   , makeEq
-      (Conv2D s p actNone x (ConstPool k))
+      (Conv2D k s p actNone x (ConstPool k))
       (Pool2DAvg k s p x)
     -- 25 conv_const_iconv_identity
   , makeEq
-      (Conv2D stride11 padSame actNone x (ConstIConv k))
+      (Conv2D k stride11 padSame actNone x (ConstIConv k))
       x
     -- 26 matmul_const_imm_identity
   , makeEq
@@ -160,16 +160,16 @@ axioms =
       (EwAdd (MatMul x y) (MatMul z w))
     -- 38 concat_conv_axis0
   , makeEq
-      (Concat axis0 (Conv2D s p c x z) (Conv2D s p c y z))
-      (Conv2D s p c (Concat axis0 x y) z)
+      (Concat axis0 (Conv2D k s p c x z) (Conv2D k s p c y z))
+      (Conv2D k s p c (Concat axis0 x y) z)
     -- 39 concat_conv_axis1
   , makeEq
-      (Concat axis1 (Conv2D s p c x y) (Conv2D s p c x z))
-      (Conv2D s p c x (Concat axis0 y z))
+      (Concat axis1 (Conv2D k s p c x y) (Conv2D k s p c x z))
+      (Conv2D k s p c x (Concat axis0 y z))
     -- 40 conv_none_concat_bilinear
   , makeEq
-      (Conv2D s p actNone (Concat axis1 x z) (Concat axis1 y w))
-      (EwAdd (Conv2D s p actNone x y) (Conv2D s p actNone z w))
+      (Conv2D k s p actNone (Concat axis1 x z) (Concat axis1 y w))
+      (EwAdd (Conv2D k s p actNone x y) (Conv2D k s p actNone z w))
     -- 41 concat_poolavg_axis1
   , makeEq
       (Concat axis1 (Pool2DAvg k s p x) (Pool2DAvg k s p y))

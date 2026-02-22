@@ -12,14 +12,14 @@ import TestUtils (assertJustEq)
 runRoundTripTests :: IO ()
 runRoundTripTests = do
   let bigExpr1 =
-        Conv2D s p c
+        Conv2D k s p c
           (Concat axis0 (MatMul x y) (MatMul x z))
           (Enlarge k (ConstPool k))
 
   let bigExpr2 =
         EwAdd
           (Transpose (MatMul x (EwAdd y z)))
-          (Conv2D stride11 padSame actNone x (ConstIConv k))
+          (Conv2D k stride11 padSame actNone x (ConstIConv k))
 
   mapM_
     (\(label, expr) ->

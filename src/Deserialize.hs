@@ -120,8 +120,8 @@ instance SExprDeserialize Equation where
   fromSExpr _ = Nothing
 
 parseExpr :: SExpr -> Maybe Expr
-parseExpr (SList [SAtom "conv2d", s, p, a, x, y]) =
-  Conv2D <$> fromSExpr s <*> fromSExpr p <*> fromSExpr a <*> fromSExpr x <*> fromSExpr y
+parseExpr (SList [SAtom "conv2d", k, s, p, a, x, y]) =
+  Conv2D <$> fromSExpr k <*> fromSExpr s <*> fromSExpr p <*> fromSExpr a <*> fromSExpr x <*> fromSExpr y
 parseExpr (SList [SAtom "pool2d-avg", k, s, p, x]) =
   Pool2DAvg <$> fromSExpr k <*> fromSExpr s <*> fromSExpr p <*> fromSExpr x
 parseExpr (SList [SAtom "pool2d-max", k, s, p, x]) =

@@ -10,8 +10,8 @@ import modal
 APP_NAME = "taso-generate-substitution-sexpr"
 TASO_REPO = "https://github.com/jiazhihao/TASO.git"
 OUTPUT_PATH = Path("data/substitutions.sexp")
+RULES_OUTPUT_PATH = Path("data/substitution_rules.txt")
 
-# PMParameter ids from include/xflow/ops.h at TASO commit 90150c0.
 PM_KERNEL_H = 4
 PM_KERNEL_W = 5
 PM_STRIDE_H = 6
@@ -115,12 +115,13 @@ def _tensor_expr(ref: TensorRef, ops) -> str:
 
     match op.type:
         case 3:  # OP_CONV2D
+            k = _kernel_expr(p[PM_KERNEL_H], p[PM_KERNEL_W])
             s = _stride_expr(p[PM_STRIDE_H], p[PM_STRIDE_W])
             pad = _pad_mode(p[PM_PAD])
             act = _acti_mode(p[PM_ACTI])
             x = _tensor_expr(TensorRef(op.input[0].opId, op.input[0].tsId), ops)
             y = _tensor_expr(TensorRef(op.input[1].opId, op.input[1].tsId), ops)
-            return f"(conv2d {s} {pad} {act} {x} {y})"
+            return f"(conv2d {k} {s} {pad} {act} {x} {y})"
 
         case 6:  # OP_POOL2D_MAX
             k = _kernel_expr(p[PM_KERNEL_H], p[PM_KERNEL_W])
@@ -204,15 +205,30 @@ def _tensor_expr(ref: TensorRef, ops) -> str:
             raise ValueError(f"Unsupported op type in substitution serializer: {op.type}")
 
 
-def _rule_to_eq(rule) -> str:
-    mapped = rule.mappedOutput[0]
-    lhs = _tensor_expr(TensorRef(mapped.srcOpId, mapped.srcTsId), rule.srcOp)
-    rhs = _tensor_expr(TensorRef(mapped.dstOpId, mapped.dstTsId), rule.dstOp)
-    return f"(eq {lhs} {rhs})"
+def _rule_to_eqs(rule) -> list[str]:
+    eqs: list[str] = []
+    for mapped in rule.mappedOutput:
+        lhs = _tensor_expr(TensorRef(mapped.srcOpId, mapped.srcTsId), rule.srcOp)
+        rhs = _tensor_expr(TensorRef(mapped.dstOpId, mapped.dstTsId), rule.dstOp)
+        eqs.append(f"(eq {lhs} {rhs})")
+    return eqs
+
+
+def _rules_to_text(rules) -> str:
+    chunks: list[str] = []
+    for idx, rule in enumerate(rules.rule):
+        chunks.append(f"rule {idx}")
+        chunks.append(str(rule).rstrip())
+    return "\n\n".join(chunks) + "\n"
+
+
+def save_rules(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 @app.function(image=image, timeout=60 * 60, cpu=8, memory=65536)
-def generate_substitution_sexpr() -> tuple[str, int, int]:
+def generate_substitution_sexpr() -> tuple[str, str, int, int]:
     workdir = Path("/root/work")
     repo = workdir / "TASO"
     gen = repo / "src" / "generator"
@@ -257,19 +273,30 @@ def generate_substitution_sexpr() -> tuple[str, int, int]:
     rules.ParseFromString(pb_path.read_bytes())
 
     lines: list[str] = []
+    seen: set[str] = set()
     for rule in rules.rule:
-        lines.append(_rule_to_eq(rule))
+        for eq in _rule_to_eqs(rule):
+            # Algebraic mode: ignore layout-level distinctions (e.g. transpose outshuffle)
+            # and keep only unique equation forms.
+            if eq not in seen:
+                seen.add(eq)
+                lines.append(eq)
 
-    return "\n".join(lines) + "\n", len(rules.rule), len(lines)
+    return "\n".join(lines) + "\n", _rules_to_text(rules), len(rules.rule), len(lines)
 
 
 @app.local_entrypoint()
 def main() -> None:
-    sexpr_text, generated_count, kept_count = generate_substitution_sexpr.remote()
+    sexpr_text, rules_text, generated_count, kept_count = generate_substitution_sexpr.remote()
 
     repo_root = Path(__file__).resolve().parents[2]
     out_path = repo_root / OUTPUT_PATH
+    rules_out_path = repo_root / RULES_OUTPUT_PATH
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(sexpr_text, encoding="utf-8")
+    save_rules(rules_out_path, rules_text)
 
-    print(f"Wrote {kept_count} substitutions (from {generated_count} generated rules) to {out_path}")
+    print(
+        f"Wrote {kept_count} substitutions (from {generated_count} generated rules) to {out_path}; "
+        f"wrote raw rules to {rules_out_path}"
+    )

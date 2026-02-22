@@ -103,7 +103,7 @@ data ScalarTerm
 
 data Expr
   = VarE Var
-  | Conv2D Stride2DTerm PadModeTerm ActiModeTerm Expr Expr
+  | Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Expr Expr
   | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Expr
   | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Expr
   | Relu Expr
@@ -139,6 +139,15 @@ instance Ord a => Ord (CommutativePair a) where
 
 newtype Equation = Equation (CommutativePair Expr)
   deriving (Eq, Ord, Read)
+
+data Rewrite = Rewrite {
+  rewriteLhs :: Expr,
+  rewriteRhs :: Expr
+  }
+  deriving (Eq, Ord, Read)
+
+instance Show Rewrite where
+  show (Rewrite lhs rhs) = show lhs ++ " -> " ++ show rhs
 
 instance Show Var where
   show (Var name _) = name
@@ -207,7 +216,7 @@ prettyExpr :: Expr -> String
 prettyExpr expr =
   case expr of
     VarE v -> show v
-    Conv2D s p c x y -> call "conv2d" [show s, show p, show c, prettyExpr x, prettyExpr y]
+    Conv2D k s p c x y -> call "conv2d" [show k, show s, show p, show c, prettyExpr x, prettyExpr y]
     Pool2DAvg k s p x -> call "pool2d-avg" [show k, show s, show p, prettyExpr x]
     Pool2DMax k s p x -> call "pool2d-max" [show k, show s, show p, prettyExpr x]
     Relu x -> call "relu" [prettyExpr x]

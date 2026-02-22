@@ -21,8 +21,8 @@ runDeserializeTests = do
 
   assertJustEq
     "deserialize: conv2d"
-    (Conv2D s padSame actRelu x y)
-    (fromSExprString "(conv2d (var s stride2d) same relu (var x tensor) (var y tensor))" :: Maybe Expr)
+    (Conv2D k s padSame actRelu x y)
+    (fromSExprString "(conv2d (var k kernel2d) (var s stride2d) same relu (var x tensor) (var y tensor))" :: Maybe Expr)
 
   assertJustEq
     "deserialize: scalar-mul"
