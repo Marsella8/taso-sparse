@@ -3,6 +3,7 @@ module Serialize
   , SExprSerialize(..)
   , renderSExpr
   , toSExprString
+  , write
   ) where
 
 import IR.IR
@@ -112,3 +113,8 @@ instance SExprSerialize Expr where
 instance SExprSerialize Equation where
   toSExpr (Equation (CommutativePair lhs rhs)) =
     list [atom "eq", toSExpr lhs, toSExpr rhs]
+
+write :: FilePath -> [Equation] -> IO ()
+write path equations = do
+  let content = unlines $ map toSExprString equations
+  writeFile path content

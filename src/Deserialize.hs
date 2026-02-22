@@ -2,6 +2,7 @@ module Deserialize
   ( SExprDeserialize(..)
   , fromSExprString
   , parseSExpr
+  , load
   ) where
 
 import Data.Char (isSpace)
@@ -196,3 +197,11 @@ parseList acc (")" : rest) = Just (SList (reverse acc), rest)
 parseList acc toks = do
   (x, rest) <- parseSExprTokens toks
   parseList (x : acc) rest
+
+load :: FilePath -> IO [Equation]
+load path = do
+  content <- fmap lines (readFile path)
+  let parseLine line = case fromSExprString line of
+        Just t -> t
+        Nothing -> error "File is not in the correct format"
+  return $ map parseLine content

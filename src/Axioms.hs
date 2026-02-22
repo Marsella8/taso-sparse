@@ -1,9 +1,12 @@
 module Axioms
   ( axioms
+  , substitutions
   ) where
 
+import Deserialize (load)
 import IR.IR
 import IR.Utils
+import System.IO.Unsafe (unsafePerformIO)
 
 axioms :: [Equation]
 axioms =
@@ -184,3 +187,6 @@ axioms =
       (Pool2DAvg k stride11 padSame (ConstIConv k))
       (ConstPool k)
   ]
+
+substitutions :: [Equation]
+substitutions = unsafePerformIO (load "data/substitutions.sexp")

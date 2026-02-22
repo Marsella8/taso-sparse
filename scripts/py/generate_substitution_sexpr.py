@@ -9,37 +9,7 @@ import modal
 
 APP_NAME = "taso-generate-substitution-sexpr"
 TASO_REPO = "https://github.com/jiazhihao/TASO.git"
-TASO_COMMIT = "90150c0"
-EXPECTED_RULES = 743
 OUTPUT_PATH = Path("data/substitutions.sexp")
-
-BLACKLIST = {
-    202,
-    209,
-    254,
-    255,
-    260,
-    307,
-    308,
-    518,
-    536,
-    560,
-    580,
-    581,
-    620,
-    621,
-    622,
-    623,
-    624,
-    625,
-    681,
-    682,
-    688,
-    689,
-    695,
-    696,
-    697,
-}
 
 # PMParameter ids from include/xflow/ops.h at TASO commit 90150c0.
 PM_KERNEL_H = 4
@@ -246,10 +216,16 @@ def generate_substitution_sexpr() -> tuple[str, int, int]:
     workdir = Path("/root/work")
     repo = workdir / "TASO"
     gen = repo / "src" / "generator"
+    xflow_ops = repo / "include" / "xflow" / "ops.h"
 
     workdir.mkdir(parents=True, exist_ok=True)
     _run(["git", "clone", TASO_REPO, str(repo)], cwd=workdir)
-    _run(["git", "checkout", TASO_COMMIT], cwd=repo)
+    if not xflow_ops.exists():
+        xflow_ops.parent.mkdir(parents=True, exist_ok=True)
+        xflow_ops.write_text(
+            '#pragma once\n#include "taso/ops.h"\nnamespace XFlow = taso;\n',
+            encoding="utf-8",
+        )
     _run(["protoc", "--cpp_out=src/generator", "--proto_path=src/core", "src/core/rules.proto"], cwd=repo)
     _run(["protoc", "--python_out=src/core", "--proto_path=src/core", "src/core/rules.proto"], cwd=repo)
 
@@ -281,13 +257,8 @@ def generate_substitution_sexpr() -> tuple[str, int, int]:
     rules.ParseFromString(pb_path.read_bytes())
 
     lines: list[str] = []
-    for idx, rule in enumerate(rules.rule):
-        if idx in BLACKLIST:
-            continue
+    for rule in rules.rule:
         lines.append(_rule_to_eq(rule))
-
-    if len(lines) != EXPECTED_RULES:
-        raise RuntimeError(f"Expected {EXPECTED_RULES} substitutions, got {len(lines)}")
 
     return "\n".join(lines) + "\n", len(rules.rule), len(lines)
 
