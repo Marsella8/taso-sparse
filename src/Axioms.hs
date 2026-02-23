@@ -71,20 +71,12 @@ mkRewrite srcBindings srcOut dstBindings dstOut =
   where
     srcGraph = mustGraph srcBindings
     dstGraph = mustGraph dstBindings
-    sharedInputs = graphFreeVars srcGraph `Set.intersection` graphFreeVars dstGraph
-    inputPairs = [(v, v) | v <- Set.toAscList sharedInputs]
-
-mustGraph :: [(Var, Expr)] -> Graph
-mustGraph bindings =
-  case mkGraph bindings of
-    Just g -> g
-    Nothing -> error "Invalid graph while building axioms"
-
-mustBimap :: [(Var, Var)] -> Bimap
-mustBimap pairs =
-  case mkBimap pairs of
-    Just bm -> bm
-    Nothing -> error "Invalid bimap while building axioms"
+    srcInputs = graphFreeVars srcGraph
+    dstInputs = graphFreeVars dstGraph
+    inputPairs
+      | srcInputs == dstInputs = [(v, v) | v <- Set.toAscList srcInputs]
+      | otherwise =
+          error "mkRewrite: src/dst input vars differ"
 
 s0 :: Var
 s0 = t "s_t0"

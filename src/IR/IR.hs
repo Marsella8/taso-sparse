@@ -16,11 +16,13 @@ module IR.IR
   , Expr(..)
   , Graph(..)
   , mkGraph
+  , mustGraph
   , graphBindings
   , graphFreeVars
   , graphOutputVars
   , Bimap
   , mkBimap
+  , mustBimap
   , Rewrite(..)
   ) where
 
@@ -142,6 +144,12 @@ mkGraph bindings = do
   guard (allUnique (map fst bindings))
   Just (Graph (Map.fromList bindings))
 
+mustGraph :: [(Var, Expr)] -> Graph
+mustGraph bindings =
+  case mkGraph bindings of
+    Just g -> g
+    Nothing -> error "Invalid graph"
+
 graphBindings :: Graph -> [(Var, Expr)]
 graphBindings (Graph m) = Map.toAscList m
 
@@ -169,6 +177,12 @@ mkBimap pairs = do
   let bm = Bi.fromList pairs
   guard (Bi.size bm == length pairs)
   Just bm
+
+mustBimap :: [(Var, Var)] -> Bimap
+mustBimap pairs =
+  case mkBimap pairs of
+    Just bm -> bm
+    Nothing -> error "Invalid bimap"
 
 data Rewrite = Rewrite
   { src :: Graph
