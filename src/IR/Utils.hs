@@ -1,6 +1,5 @@
 module IR.Utils
-  ( makeEq
-  , x
+  ( x
   , y
   , z
   , w
@@ -21,56 +20,53 @@ module IR.Utils
 
 import IR.IR
 
-makeEq :: Expr -> Expr -> Equation
-makeEq lhs rhs = Equation (CommutativePair lhs rhs)
+x :: Tensor
+x = Tensor "x"
 
-x :: Expr
-x = VarE (Var "x" TensorSort)
+y :: Tensor
+y = Tensor "y"
 
-y :: Expr
-y = VarE (Var "y" TensorSort)
+z :: Tensor
+z = Tensor "z"
 
-z :: Expr
-z = VarE (Var "z" TensorSort)
-
-w :: Expr
-w = VarE (Var "w" TensorSort)
+w :: Tensor
+w = Tensor "w"
 
 s :: Stride2DTerm
-s = Stride2DVar (Var "s" Stride2DSort)
+s = Stride2DTermVar (Stride2DVariable "s")
 
 p :: PadModeTerm
-p = PadModeVar (Var "p" PadModeSort)
+p = PadModeTermVar (PadModeVariable "p")
 
 c :: ActiModeTerm
-c = ActiModeVar (Var "c" ActiModeSort)
+c = ActiModeTermVar (ActiModeVariable "c")
 
 k :: Kernel2DTerm
-k = Kernel2DVar (Var "k" Kernel2DSort)
+k = Kernel2DTermVar (Kernel2DVariable "k")
 
 a :: AxisTerm
-a = AxisVar (Var "a" AxisSort)
+a = AxisTermVar (AxisVariable "a")
 
 scW :: ScalarTerm
-scW = ScalarVar (Var "w" ScalarSort)
+scW = ScalarTermVar (ScalarVariable "w")
 
 scY :: ScalarTerm
-scY = ScalarVar (Var "y" ScalarSort)
+scY = ScalarTermVar (ScalarVariable "y")
 
 axis0 :: AxisTerm
-axis0 = AxisLit (Axis 0)
+axis0 = AxisTermLit (AxisLiteral 0)
 
 axis1 :: AxisTerm
-axis1 = AxisLit (Axis 1)
+axis1 = AxisTermLit (AxisLiteral 1)
 
 padSame :: PadModeTerm
-padSame = PadModeLit PadSame
+padSame = PadModeTermLit PadSame
 
 actNone :: ActiModeTerm
-actNone = ActiModeLit ActNone
+actNone = ActiModeTermLit ActNone
 
 actRelu :: ActiModeTerm
-actRelu = ActiModeLit ActRelu
+actRelu = ActiModeTermLit ActRelu
 
 stride11 :: Stride2DTerm
-stride11 = Stride2DLit (Stride2D 1 1)
+stride11 = Stride2DTermLit (Stride2DLiteral 1 1)

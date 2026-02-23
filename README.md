@@ -34,3 +34,27 @@ This is more self explanatory, right now we have Eq(a, b), but dont really have 
 3. Uhh some other issues, like right now there is a awkward split between what values are just variables and which are concretized.
 
 Also need to figure out how invertible the TASO substitutions are, i beleive that if you take them in the reverse direction, some of them generate fresh vairbales which might be cooked.
+
+
+
+UPDATE:
+
+ok I fixed this stuff, now rewrites look as follows:
+
+tranpose(transpose(x)) -> x
+
+becomes:
+
+(rewrite 
+    (graph 
+        (asst (tensor s0) (transpose (tensor x))) 
+        (asst (tensor s1) (transpose (tensor s0)))) 
+    (graph) 
+    (bimap ((tensor x) (tensor x))) 
+    (bimap ((tensor s1) (tensor x)))
+)
+
+so:
+First graph has 2 nodes: s0 = transpose(x) and s1 = transpose(s0)
+Second graph is empty (since we are not binding any new variables)
+Then the maps are: x -> x and s1 -> x (note that in this second graph, x is both input and output)

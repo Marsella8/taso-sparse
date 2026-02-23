@@ -4,9 +4,7 @@ module Axioms
   ) where
 
 import qualified Data.Set as Set
-import Deserialize (load)
 import IR.IR
-import System.IO.Unsafe (unsafePerformIO)
 
 axioms :: [Rewrite]
 axioms =
@@ -57,7 +55,7 @@ axioms =
   ]
 
 substitutions :: [Rewrite]
-substitutions = unsafePerformIO (load "data/substitutions.sexp")
+substitutions = []
 {-# NOINLINE substitutions #-}
 
 mkRewrite :: [(Tensor, Expr)] -> Tensor -> [(Tensor, Expr)] -> Tensor -> Rewrite
@@ -69,32 +67,43 @@ mkRewrite srcBindings srcOut dstBindings dstOut =
     , outputMap = mustBimap [(TensorVar srcOut, TensorVar dstOut)]
     }
   where
-    srcGraph = mustGraph srcBindings
-    dstGraph = mustGraph dstBindings
-    srcInputs = graphFreeVars srcGraph
-    dstInputs = graphFreeVars dstGraph
+    srcGraph = mustGraph (map toAsst srcBindings)
+    dstGraph = mustGraph (map toAsst dstBindings)
+    srcInputs = graphInputsWithOutput srcGraph srcOut
+    dstInputs = graphInputsWithOutput dstGraph dstOut
     inputPairs
-      | srcInputs == dstInputs = [(v0, v0) | v0 <- Set.toAscList srcInputs]
+      | dstInputs `Set.isSubsetOf` srcInputs =
+          [(v0, v0) | v0 <- Set.toAscList dstInputs]
       | otherwise =
-          error "mkRewrite: src/dst input vars differ"
+          error "mkRewrite: dst inputs must be subset of src inputs"
+    toAsst (t0, e0) = Asst (t0, e0)
+
+graphInputsWithOutput :: Graph -> Tensor -> Set.Set Var
+graphInputsWithOutput g outT =
+  if outT `Set.member` assigned
+    then free
+    else Set.insert (TensorVar outT) free
+  where
+    free = graphFreeVars g
+    assigned = Set.fromList (map fst (graphBindings g))
 
 s0 :: Tensor
-s0 = t "s_t0"
+s0 = t "s0"
 
 s1 :: Tensor
-s1 = t "s_t1"
+s1 = t "s1"
 
 s2 :: Tensor
-s2 = t "s_t2"
+s2 = t "s2"
 
 d0 :: Tensor
-d0 = t "d_t0"
+d0 = t "d0"
 
 d1 :: Tensor
-d1 = t "d_t1"
+d1 = t "d1"
 
 d2 :: Tensor
-d2 = t "d_t2"
+d2 = t "d2"
 
 t :: String -> Tensor
 t = Tensor

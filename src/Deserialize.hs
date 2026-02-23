@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module Deserialize
   ( SExprDeserialize(..)
   , fromSExprString
@@ -5,6 +7,8 @@ module Deserialize
   , load
   ) where
 
+import Control.Applicative ((<|>))
+import qualified Data.Bimap as BM
 import Data.Char (isSpace)
 import IR.IR
 import Serialize (SExpr(..))
@@ -26,24 +30,59 @@ instance SExprDeserialize Sort where
   fromSExpr (SAtom "axis") = Just AxisSort
   fromSExpr _ = Nothing
 
+parseTypedVarName :: String -> SExpr -> Maybe String
+parseTypedVarName expectedTag (SList [SAtom tag, SAtom name])
+  | expectedTag == tag = Just name
+  | otherwise = Nothing
+parseTypedVarName _ _ = Nothing
+
+instance SExprDeserialize Tensor where
+  fromSExpr sx = Tensor <$> parseTypedVarName "tensor" sx
+
+instance SExprDeserialize ScalarVariable where
+  fromSExpr sx = ScalarVariable <$> parseTypedVarName "scalar" sx
+
+instance SExprDeserialize Stride2DVariable where
+  fromSExpr sx = Stride2DVariable <$> parseTypedVarName "stride2d" sx
+
+instance SExprDeserialize Kernel2DVariable where
+  fromSExpr sx = Kernel2DVariable <$> parseTypedVarName "kernel2d" sx
+
+instance SExprDeserialize PadModeVariable where
+  fromSExpr sx = PadModeVariable <$> parseTypedVarName "padmode" sx
+
+instance SExprDeserialize ActiModeVariable where
+  fromSExpr sx = ActiModeVariable <$> parseTypedVarName "actimode" sx
+
+instance SExprDeserialize AxisVariable where
+  fromSExpr sx = do
+    name <- parseTypedVarName "axis" sx
+    case parseInt name of
+      Just _ -> Nothing
+      Nothing -> Just (AxisVariable name)
+
 instance SExprDeserialize Var where
-  fromSExpr (SList [SAtom "var", SAtom name, sortExpr]) = do
-    sort' <- fromSExpr sortExpr
-    Just (Var name sort')
-  fromSExpr _ = Nothing
+  fromSExpr sx =
+    (TensorVar <$> fromSExpr sx)
+      <|> (ScalarVar <$> fromSExpr sx)
+      <|> (Stride2DVar <$> fromSExpr sx)
+      <|> (Kernel2DVar <$> fromSExpr sx)
+      <|> (PadModeVar <$> fromSExpr sx)
+      <|> (ActiModeVar <$> fromSExpr sx)
+      <|> (AxisVar <$> fromSExpr sx)
 
-instance SExprDeserialize Stride2D where
+instance SExprDeserialize Stride2DLiteral where
   fromSExpr (SList [SAtom "stride2d", SAtom shVal, SAtom swVal]) =
-    Stride2D <$> parseInt shVal <*> parseInt swVal
+    Stride2DLiteral <$> parseInt shVal <*> parseInt swVal
   fromSExpr _ = Nothing
 
-instance SExprDeserialize Kernel2D where
+instance SExprDeserialize Kernel2DLiteral where
   fromSExpr (SList [SAtom "kernel2d", SAtom khVal, SAtom kwVal]) =
-    Kernel2D <$> parseInt khVal <*> parseInt kwVal
+    Kernel2DLiteral <$> parseInt khVal <*> parseInt kwVal
   fromSExpr _ = Nothing
 
-instance SExprDeserialize Axis where
-  fromSExpr (SList [SAtom "axis", SAtom n]) = Axis <$> parseInt n
+instance SExprDeserialize AxisLiteral where
+  fromSExpr (SList [SAtom "axis", SAtom n]) = AxisLiteral <$> parseInt n
   fromSExpr _ = Nothing
 
 instance SExprDeserialize PadMode where
@@ -58,65 +97,68 @@ instance SExprDeserialize ActiMode where
   fromSExpr (SAtom "tanh") = Just ActTanh
   fromSExpr _ = Nothing
 
-instance SExprDeserialize Scalar where
-  fromSExpr (SAtom n) = Scalar <$> parseInt n
+instance SExprDeserialize ScalarLiteral where
+  fromSExpr (SAtom n) = ScalarLiteral <$> parseInt n
   fromSExpr _ = Nothing
 
 instance SExprDeserialize Stride2DTerm where
   fromSExpr sx =
-    case varOfSort Stride2DSort sx of
-      Just v -> Just (Stride2DVar v)
-      Nothing -> Stride2DLit <$> fromSExpr sx
+    (Stride2DTermVar <$> fromSExpr sx)
+      <|> (Stride2DTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize Kernel2DTerm where
   fromSExpr sx =
-    case varOfSort Kernel2DSort sx of
-      Just v -> Just (Kernel2DVar v)
-      Nothing -> Kernel2DLit <$> fromSExpr sx
+    (Kernel2DTermVar <$> fromSExpr sx)
+      <|> (Kernel2DTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize AxisTerm where
   fromSExpr sx =
-    case varOfSort AxisSort sx of
-      Just v -> Just (AxisVar v)
-      Nothing -> AxisLit <$> fromSExpr sx
+    (AxisTermVar <$> fromSExpr sx)
+      <|> (AxisTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize PadModeTerm where
   fromSExpr sx =
-    case varOfSort PadModeSort sx of
-      Just v -> Just (PadModeVar v)
-      Nothing -> PadModeLit <$> fromSExpr sx
+    (PadModeTermVar <$> fromSExpr sx)
+      <|> (PadModeTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize ActiModeTerm where
   fromSExpr sx =
-    case varOfSort ActiModeSort sx of
-      Just v -> Just (ActiModeVar v)
-      Nothing -> ActiModeLit <$> fromSExpr sx
+    (ActiModeTermVar <$> fromSExpr sx)
+      <|> (ActiModeTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize ScalarTerm where
+  fromSExpr (SList [SAtom "scalar-mul", a, b]) =
+    ScalarMul <$> fromSExpr a <*> fromSExpr b
   fromSExpr sx =
-    case varOfSort ScalarSort sx of
-      Just v -> Just (ScalarVar v)
-      Nothing ->
-        case sx of
-          SList [SAtom "scalar-mul", a, b] ->
-            ScalarMul <$> fromSExpr a <*> fromSExpr b
-          _ -> ScalarLit <$> fromSExpr sx
+    (ScalarTermVar <$> fromSExpr sx)
+      <|> (ScalarTermLit <$> fromSExpr sx)
 
 instance SExprDeserialize Expr where
-  fromSExpr sx =
-    case varOfSort TensorSort sx of
-      Just v -> Just (VarE v)
-      Nothing -> parseExpr sx
+  fromSExpr = parseExpr
 
-instance SExprDeserialize Equation where
-  fromSExpr (SList [SAtom "eq", lhs, rhs]) = do
-    lhs' <- fromSExpr lhs
-    rhs' <- fromSExpr rhs
-    Just (Equation (CommutativePair lhs' rhs'))
-  fromSExpr (SList [SAtom "eq", SList [lhs, rhs]]) = do
-    lhs' <- fromSExpr lhs
-    rhs' <- fromSExpr rhs
-    Just (Equation (CommutativePair lhs' rhs'))
+instance SExprDeserialize Asst where
+  fromSExpr (SList [SAtom "asst", tExpr, eExpr]) =
+    Asst <$> ((,) <$> fromSExpr tExpr <*> fromSExpr eExpr)
+  fromSExpr _ = Nothing
+
+instance SExprDeserialize Graph where
+  fromSExpr (SList (SAtom "graph" : asstExprs)) = do
+    assts <- mapM fromSExpr asstExprs
+    mkGraph assts
+  fromSExpr _ = Nothing
+
+instance SExprDeserialize (BM.Bimap Var Var) where
+  fromSExpr (SList (SAtom "bimap" : pairExprs)) = do
+    pairs <- mapM parsePair pairExprs
+    mkBimap pairs
+    where
+      parsePair (SList [kExpr, vExpr]) = (,) <$> fromSExpr kExpr <*> fromSExpr vExpr
+      parsePair _ = Nothing
+  fromSExpr _ = Nothing
+
+instance SExprDeserialize Rewrite where
+  fromSExpr (SList [SAtom "rewrite", srcExpr, dstExpr, inExpr, outExpr]) =
+    Rewrite <$> fromSExpr srcExpr <*> fromSExpr dstExpr <*> fromSExpr inExpr <*> fromSExpr outExpr
   fromSExpr _ = Nothing
 
 parseExpr :: SExpr -> Maybe Expr
@@ -143,23 +185,6 @@ parseExpr (SList [SAtom "const-iconv", k]) = ConstIConv <$> fromSExpr k
 parseExpr (SList [SAtom "const-imm"]) = Just ConstImm
 parseExpr (SList [SAtom "const-one"]) = Just ConstOne
 parseExpr _ = Nothing
-
-varOfSort :: Sort -> SExpr -> Maybe Var
-varOfSort expected (SList [SAtom "var", SAtom name, SAtom sortName]) =
-  case sortFromName sortName of
-    Just sort' | sort' == expected -> Just (Var name sort')
-    _ -> Nothing
-varOfSort _ _ = Nothing
-
-sortFromName :: String -> Maybe Sort
-sortFromName "tensor" = Just TensorSort
-sortFromName "scalar" = Just ScalarSort
-sortFromName "stride2d" = Just Stride2DSort
-sortFromName "kernel2d" = Just Kernel2DSort
-sortFromName "padmode" = Just PadModeSort
-sortFromName "actimode" = Just ActiModeSort
-sortFromName "axis" = Just AxisSort
-sortFromName _ = Nothing
 
 parseInt :: String -> Maybe Int
 parseInt = readMaybe
@@ -198,10 +223,11 @@ parseList acc toks = do
   (x, rest) <- parseSExprTokens toks
   parseList (x : acc) rest
 
-load :: FilePath -> IO [Equation]
+load :: SExprDeserialize a => FilePath -> IO [a]
 load path = do
   content <- fmap lines (readFile path)
+  let nonEmpty = filter (not . all isSpace) content
   let parseLine line = case fromSExprString line of
         Just t -> t
         Nothing -> error "File is not in the correct format"
-  return $ map parseLine content
+  return (map parseLine nonEmpty)

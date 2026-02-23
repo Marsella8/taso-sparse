@@ -11,39 +11,48 @@ import TestUtils (assertEq)
 runSerializeTests :: IO ()
 runSerializeTests = do
   assertEq
-    "serialize: var"
-    "(var x tensor)"
+    "serialize: tensor"
+    "(tensor x)"
     (renderSExpr (toSExpr x))
 
   assertEq
     "serialize: matmul"
-    "(matmul (var x tensor) (var y tensor))"
+    "(matmul (tensor x) (tensor y))"
     (renderSExpr (toSExpr (MatMul x y)))
 
   assertEq
     "serialize: conv2d mixed params"
-    "(conv2d (var k kernel2d) (var s stride2d) same relu (var x tensor) (var y tensor))"
+    "(conv2d (kernel2d k) (stride2d s) same relu (tensor x) (tensor y))"
     (renderSExpr (toSExpr (Conv2D k s padSame actRelu x y)))
 
   assertEq
     "serialize: scalar literal"
-    "(mul (var x tensor) 3)"
-    (renderSExpr (toSExpr (Mul x (ScalarLit (Scalar 3)))))
+    "(mul (tensor x) 3)"
+    (renderSExpr (toSExpr (Mul x (ScalarTermLit (ScalarLiteral 3)))))
 
-  let bigExpr =
-        Conv2D k s p c
-          (Concat axis0 (MatMul x y) (MatMul x z))
-          (Enlarge k (ConstPool k))
-
+  let asst = Asst (Tensor "out", Relu x)
   assertEq
-    "serialize: composed expr"
-    "(conv2d (var k kernel2d) (var s stride2d) (var p padmode) (var c actimode) (concat (axis 0) (matmul (var x tensor) (var y tensor)) (matmul (var x tensor) (var z tensor))) (enlarge (var k kernel2d) (const-pool (var k kernel2d))))"
-    (renderSExpr (toSExpr bigExpr))
+    "serialize: asst"
+    "(asst (tensor out) (relu (tensor x)))"
+    (renderSExpr (toSExpr asst))
 
+  let graph = mustGraph [asst]
   assertEq
-    "serialize: equation"
-    "(eq (ewadd (var x tensor) (var y tensor)) (ewadd (var y tensor) (var x tensor)))"
-    (renderSExpr (toSExpr (makeEq (EwAdd x y) (EwAdd y x))))
+    "serialize: graph"
+    "(graph (asst (tensor out) (relu (tensor x))))"
+    (renderSExpr (toSExpr graph))
+
+  let rw =
+        Rewrite
+          { src = mustGraph [Asst (Tensor "s0", Relu x)]
+          , dst = mustGraph [Asst (Tensor "d0", Sigmoid x)]
+          , inputMap = mustBimap [(TensorVar x, TensorVar x)]
+          , outputMap = mustBimap [(TensorVar (Tensor "s0"), TensorVar (Tensor "d0"))]
+          }
+  assertEq
+    "serialize: rewrite"
+    "(rewrite (graph (asst (tensor s0) (relu (tensor x)))) (graph (asst (tensor d0) (sigmoid (tensor x)))) (bimap ((tensor x) (tensor x))) (bimap ((tensor s0) (tensor d0))))"
+    (renderSExpr (toSExpr rw))
 
   assertEq
     "serialize: all axioms"

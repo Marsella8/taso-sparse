@@ -23,6 +23,7 @@ module IR.IR
   , ActiModeTerm(..)
   , ScalarTerm(..)
   , Expr(..)
+  , Asst(..)
   , Graph(..)
   , mkGraph
   , mustGraph
@@ -38,8 +39,6 @@ module IR.IR
 import Control.Monad (guard)
 import qualified Data.Bimap as Bi
 import Data.List (intercalate)
-import qualified Data.Map.Strict as Map
-import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 
@@ -204,38 +203,41 @@ data Expr
   | ConstOne
   deriving (Eq, Ord, Read)
 
+newtype Asst = Asst (Tensor, Expr)
+  deriving (Eq, Ord, Read)
+
 newtype Graph = Graph
-  { graphMap :: Map Tensor Expr
+  { graphAssts :: [Asst]
   }
   deriving (Eq, Ord, Read)
 
-mkGraph :: [(Tensor, Expr)] -> Maybe Graph
-mkGraph bindings = do
-  guard (allUnique (map fst bindings))
-  Just (Graph (Map.fromList bindings))
+mkGraph :: [Asst] -> Maybe Graph
+mkGraph assts = do
+  guard (allUnique (map asstTensor assts))
+  Just (Graph assts)
 
-mustGraph :: [(Tensor, Expr)] -> Graph
+mustGraph :: [Asst] -> Graph
 mustGraph bindings =
   case mkGraph bindings of
     Just g -> g
     Nothing -> error "Invalid graph"
 
 graphBindings :: Graph -> [(Tensor, Expr)]
-graphBindings (Graph m) = Map.toAscList m
+graphBindings (Graph assts) = map unAsst assts
 
 graphFreeVars :: Graph -> Set Var
-graphFreeVars (Graph m) =
+graphFreeVars (Graph assts) =
   referenced Set.\\ assigned
   where
-    assigned = Set.map TensorVar (Map.keysSet m)
-    referenced = Set.unions (map exprVars (Map.elems m))
+    assigned = Set.map TensorVar (Set.fromList (map asstTensor assts))
+    referenced = Set.unions (map (exprVars . asstExpr) assts)
 
 graphOutputVars :: Graph -> Set Tensor
-graphOutputVars (Graph m) =
+graphOutputVars (Graph assts) =
   assigned Set.\\ usedByOthers
   where
-    assigned = Map.keysSet m
-    usedByOthers = Set.unions (map exprTensorVars (Map.elems m))
+    assigned = Set.fromList (map asstTensor assts)
+    usedByOthers = Set.unions (map (exprTensorVars . asstExpr) assts)
 
 type Bimap = Bi.Bimap Var Var
 
@@ -481,3 +483,12 @@ scalarVars st =
 
 allUnique :: Ord a => [a] -> Bool
 allUnique xs = length xs == Set.size (Set.fromList xs)
+
+asstTensor :: Asst -> Tensor
+asstTensor (Asst (t, _)) = t
+
+asstExpr :: Asst -> Expr
+asstExpr (Asst (_, e)) = e
+
+unAsst :: Asst -> (Tensor, Expr)
+unAsst (Asst p) = p
