@@ -1,12 +1,21 @@
 module IR.IR
   ( Sort(..)
+  , Tensor(..)
+  , ScalarVariable(..)
+  , Stride2DVariable(..)
+  , Kernel2DVariable(..)
+  , PadModeVariable(..)
+  , ActiModeVariable(..)
+  , AxisVariable(..)
   , Var(..)
-  , Kernel2D(..)
-  , Stride2D(..)
+  , varName
+  , varSort
+  , Kernel2DLiteral(..)
+  , Stride2DLiteral(..)
+  , AxisLiteral(..)
+  , ScalarLiteral(..)
   , PadMode(..)
   , ActiMode(..)
-  , Axis(..)
-  , Scalar(..)
   , Stride2DTerm(..)
   , Kernel2DTerm(..)
   , AxisTerm(..)
@@ -44,19 +53,80 @@ data Sort
   | AxisSort
   deriving (Eq, Ord, Read)
 
-data Var = Var
-  { varName :: String
-  , varSort :: Sort
+newtype Tensor = Tensor
+  { tensorName :: String
   }
   deriving (Eq, Ord, Read)
 
-data Kernel2D = Kernel2D
+newtype ScalarVariable = ScalarVariable
+  { scalarVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+newtype Stride2DVariable = Stride2DVariable
+  { stride2DVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+newtype Kernel2DVariable = Kernel2DVariable
+  { kernel2DVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+newtype PadModeVariable = PadModeVariable
+  { padModeVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+newtype ActiModeVariable = ActiModeVariable
+  { actiModeVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+newtype AxisVariable = AxisVariable
+  { axisVariableName :: String
+  }
+  deriving (Eq, Ord, Read)
+
+data Var
+  = TensorVar Tensor
+  | ScalarVar ScalarVariable
+  | Stride2DVar Stride2DVariable
+  | Kernel2DVar Kernel2DVariable
+  | PadModeVar PadModeVariable
+  | ActiModeVar ActiModeVariable
+  | AxisVar AxisVariable
+  deriving (Eq, Ord, Read)
+
+varName :: Var -> String
+varName var =
+  case var of
+    TensorVar (Tensor n) -> n
+    ScalarVar (ScalarVariable n) -> n
+    Stride2DVar (Stride2DVariable n) -> n
+    Kernel2DVar (Kernel2DVariable n) -> n
+    PadModeVar (PadModeVariable n) -> n
+    ActiModeVar (ActiModeVariable n) -> n
+    AxisVar (AxisVariable n) -> n
+
+varSort :: Var -> Sort
+varSort var =
+  case var of
+    TensorVar _ -> TensorSort
+    ScalarVar _ -> ScalarSort
+    Stride2DVar _ -> Stride2DSort
+    Kernel2DVar _ -> Kernel2DSort
+    PadModeVar _ -> PadModeSort
+    ActiModeVar _ -> ActiModeSort
+    AxisVar _ -> AxisSort
+
+data Kernel2DLiteral = Kernel2DLiteral
   { kh :: Int
   , kw :: Int
   }
   deriving (Eq, Ord, Read)
 
-data Stride2D = Stride2D
+data Stride2DLiteral = Stride2DLiteral
   { sh :: Int
   , sw :: Int
   }
@@ -74,60 +144,60 @@ data ActiMode
   | ActTanh
   deriving (Eq, Ord, Read)
 
-newtype Axis = Axis Int
+newtype AxisLiteral = AxisLiteral Int
   deriving (Eq, Ord, Read)
 
-newtype Scalar = Scalar Int
+newtype ScalarLiteral = ScalarLiteral Int
   deriving (Eq, Ord, Read)
 
 data Stride2DTerm
-  = Stride2DVar Var
-  | Stride2DLit Stride2D
+  = Stride2DTermVar Stride2DVariable
+  | Stride2DTermLit Stride2DLiteral
   deriving (Eq, Ord, Read)
 
 data Kernel2DTerm
-  = Kernel2DVar Var
-  | Kernel2DLit Kernel2D
+  = Kernel2DTermVar Kernel2DVariable
+  | Kernel2DTermLit Kernel2DLiteral
   deriving (Eq, Ord, Read)
 
 data AxisTerm
-  = AxisVar Var
-  | AxisLit Axis
+  = AxisTermVar AxisVariable
+  | AxisTermLit AxisLiteral
   deriving (Eq, Ord, Read)
 
 data PadModeTerm
-  = PadModeVar Var
-  | PadModeLit PadMode
+  = PadModeTermVar PadModeVariable
+  | PadModeTermLit PadMode
   deriving (Eq, Ord, Read)
 
 data ActiModeTerm
-  = ActiModeVar Var
-  | ActiModeLit ActiMode
+  = ActiModeTermVar ActiModeVariable
+  | ActiModeTermLit ActiMode
   deriving (Eq, Ord, Read)
 
 data ScalarTerm
-  = ScalarVar Var
-  | ScalarLit Scalar
+  = ScalarTermVar ScalarVariable
+  | ScalarTermLit ScalarLiteral
   | ScalarMul ScalarTerm ScalarTerm
   deriving (Eq, Ord, Read)
 
 -- Shallow expressions: operator inputs are variable references only.
 data Expr
-  = Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Var Var
-  | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Var
-  | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Var
-  | Relu Var
-  | Sigmoid Var
-  | Tanh Var
-  | MatMul Var Var
-  | EwAdd Var Var
-  | EwMul Var Var
-  | Mul Var ScalarTerm
-  | Transpose Var
-  | Concat AxisTerm Var Var
-  | Split0 AxisTerm Var
-  | Split1 AxisTerm Var
-  | Enlarge Kernel2DTerm Var
+  = Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Tensor Tensor
+  | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Tensor
+  | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Tensor
+  | Relu Tensor
+  | Sigmoid Tensor
+  | Tanh Tensor
+  | MatMul Tensor Tensor
+  | EwAdd Tensor Tensor
+  | EwMul Tensor Tensor
+  | Mul Tensor ScalarTerm
+  | Transpose Tensor
+  | Concat AxisTerm Tensor Tensor
+  | Split0 AxisTerm Tensor
+  | Split1 AxisTerm Tensor
+  | Enlarge Kernel2DTerm Tensor
   | ConstPool Kernel2DTerm
   | ConstIConv Kernel2DTerm
   | ConstImm
@@ -135,37 +205,37 @@ data Expr
   deriving (Eq, Ord, Read)
 
 newtype Graph = Graph
-  { graphMap :: Map Var Expr
+  { graphMap :: Map Tensor Expr
   }
   deriving (Eq, Ord, Read)
 
-mkGraph :: [(Var, Expr)] -> Maybe Graph
+mkGraph :: [(Tensor, Expr)] -> Maybe Graph
 mkGraph bindings = do
   guard (allUnique (map fst bindings))
   Just (Graph (Map.fromList bindings))
 
-mustGraph :: [(Var, Expr)] -> Graph
+mustGraph :: [(Tensor, Expr)] -> Graph
 mustGraph bindings =
   case mkGraph bindings of
     Just g -> g
     Nothing -> error "Invalid graph"
 
-graphBindings :: Graph -> [(Var, Expr)]
+graphBindings :: Graph -> [(Tensor, Expr)]
 graphBindings (Graph m) = Map.toAscList m
 
 graphFreeVars :: Graph -> Set Var
 graphFreeVars (Graph m) =
   referenced Set.\\ assigned
   where
-    assigned = Map.keysSet m
+    assigned = Set.map TensorVar (Map.keysSet m)
     referenced = Set.unions (map exprVars (Map.elems m))
 
-graphOutputVars :: Graph -> Set Var
+graphOutputVars :: Graph -> Set Tensor
 graphOutputVars (Graph m) =
   assigned Set.\\ usedByOthers
   where
     assigned = Map.keysSet m
-    usedByOthers = Set.unions (map exprVars (Map.elems m)) `Set.intersection` assigned
+    usedByOthers = Set.unions (map exprTensorVars (Map.elems m))
 
 type Bimap = Bi.Bimap Var Var
 
@@ -192,14 +262,35 @@ data Rewrite = Rewrite
   }
   deriving (Eq, Ord)
 
+instance Show Tensor where
+  show (Tensor n) = n
+
+instance Show ScalarVariable where
+  show (ScalarVariable n) = n
+
+instance Show Stride2DVariable where
+  show (Stride2DVariable n) = n
+
+instance Show Kernel2DVariable where
+  show (Kernel2DVariable n) = n
+
+instance Show PadModeVariable where
+  show (PadModeVariable n) = n
+
+instance Show ActiModeVariable where
+  show (ActiModeVariable n) = n
+
+instance Show AxisVariable where
+  show (AxisVariable n) = n
+
 instance Show Var where
-  show (Var name _) = name
+  show = varName
 
-instance Show Kernel2D where
-  show (Kernel2D h w) = "(" ++ show h ++ ", " ++ show w ++ ")"
+instance Show Kernel2DLiteral where
+  show (Kernel2DLiteral h w) = "(" ++ show h ++ ", " ++ show w ++ ")"
 
-instance Show Stride2D where
-  show (Stride2D h w) = "(" ++ show h ++ ", " ++ show w ++ ")"
+instance Show Stride2DLiteral where
+  show (Stride2DLiteral h w) = "(" ++ show h ++ ", " ++ show w ++ ")"
 
 instance Show PadMode where
   show PadSame = "same"
@@ -211,31 +302,31 @@ instance Show ActiMode where
   show ActSigmoid = "sigmoid"
   show ActTanh = "tanh"
 
-instance Show Axis where
-  show (Axis n) = show n
+instance Show AxisLiteral where
+  show (AxisLiteral n) = show n
 
-instance Show Scalar where
-  show (Scalar n) = show n
+instance Show ScalarLiteral where
+  show (ScalarLiteral n) = show n
 
 instance Show Stride2DTerm where
-  show (Stride2DVar v) = show v
-  show (Stride2DLit s) = show s
+  show (Stride2DTermVar v) = show v
+  show (Stride2DTermLit s) = show s
 
 instance Show Kernel2DTerm where
-  show (Kernel2DVar v) = show v
-  show (Kernel2DLit k) = show k
+  show (Kernel2DTermVar v) = show v
+  show (Kernel2DTermLit k) = show k
 
 instance Show AxisTerm where
-  show (AxisVar v) = show v
-  show (AxisLit a) = show a
+  show (AxisTermVar v) = show v
+  show (AxisTermLit a) = show a
 
 instance Show PadModeTerm where
-  show (PadModeVar v) = show v
-  show (PadModeLit p) = show p
+  show (PadModeTermVar v) = show v
+  show (PadModeTermLit p) = show p
 
 instance Show ActiModeTerm where
-  show (ActiModeVar v) = show v
-  show (ActiModeLit a) = show a
+  show (ActiModeTermVar v) = show v
+  show (ActiModeTermLit a) = show a
 
 instance Show ScalarTerm where
   show = prettyScalarTerm
@@ -258,8 +349,8 @@ instance Show Rewrite where
       ++ ")"
 
 prettyScalarTerm :: ScalarTerm -> String
-prettyScalarTerm (ScalarVar v) = show v
-prettyScalarTerm (ScalarLit s) = show s
+prettyScalarTerm (ScalarTermVar v) = show v
+prettyScalarTerm (ScalarTermLit s) = show s
 prettyScalarTerm (ScalarMul x y) =
   "(" ++ prettyScalarTerm x ++ " * " ++ prettyScalarTerm y ++ ")"
 
@@ -291,6 +382,43 @@ prettyExpr expr =
 exprVars :: Expr -> Set Var
 exprVars expr =
   case expr of
+    Conv2D k s p c x y ->
+      kernel2DTermVars k
+        `Set.union` stride2DTermVars s
+        `Set.union` padModeTermVars p
+        `Set.union` actiModeTermVars c
+        `Set.union` tensorVarRefSet x
+        `Set.union` tensorVarRefSet y
+    Pool2DAvg k s p x ->
+      kernel2DTermVars k
+        `Set.union` stride2DTermVars s
+        `Set.union` padModeTermVars p
+        `Set.union` tensorVarRefSet x
+    Pool2DMax k s p x ->
+      kernel2DTermVars k
+        `Set.union` stride2DTermVars s
+        `Set.union` padModeTermVars p
+        `Set.union` tensorVarRefSet x
+    Relu x -> tensorVarRefSet x
+    Sigmoid x -> tensorVarRefSet x
+    Tanh x -> tensorVarRefSet x
+    MatMul x y -> tensorVarRefSet x `Set.union` tensorVarRefSet y
+    EwAdd x y -> tensorVarRefSet x `Set.union` tensorVarRefSet y
+    EwMul x y -> tensorVarRefSet x `Set.union` tensorVarRefSet y
+    Mul x s -> tensorVarRefSet x `Set.union` scalarVars s
+    Transpose x -> tensorVarRefSet x
+    Concat a x y -> axisTermVars a `Set.union` tensorVarRefSet x `Set.union` tensorVarRefSet y
+    Split0 a x -> axisTermVars a `Set.union` tensorVarRefSet x
+    Split1 a x -> axisTermVars a `Set.union` tensorVarRefSet x
+    Enlarge k x -> kernel2DTermVars k `Set.union` tensorVarRefSet x
+    ConstPool k -> kernel2DTermVars k
+    ConstIConv k -> kernel2DTermVars k
+    ConstImm -> Set.empty
+    ConstOne -> Set.empty
+
+exprTensorVars :: Expr -> Set Tensor
+exprTensorVars expr =
+  case expr of
     Conv2D _ _ _ _ x y -> Set.fromList [x, y]
     Pool2DAvg _ _ _ x -> Set.singleton x
     Pool2DMax _ _ _ x -> Set.singleton x
@@ -300,7 +428,7 @@ exprVars expr =
     MatMul x y -> Set.fromList [x, y]
     EwAdd x y -> Set.fromList [x, y]
     EwMul x y -> Set.fromList [x, y]
-    Mul x s -> Set.insert x (scalarVars s)
+    Mul x _ -> Set.singleton x
     Transpose x -> Set.singleton x
     Concat _ x y -> Set.fromList [x, y]
     Split0 _ x -> Set.singleton x
@@ -311,11 +439,44 @@ exprVars expr =
     ConstImm -> Set.empty
     ConstOne -> Set.empty
 
+tensorVarRefSet :: Tensor -> Set Var
+tensorVarRefSet v = Set.singleton (TensorVar v)
+
+stride2DTermVars :: Stride2DTerm -> Set Var
+stride2DTermVars st =
+  case st of
+    Stride2DTermVar v -> Set.singleton (Stride2DVar v)
+    Stride2DTermLit _ -> Set.empty
+
+kernel2DTermVars :: Kernel2DTerm -> Set Var
+kernel2DTermVars kt =
+  case kt of
+    Kernel2DTermVar v -> Set.singleton (Kernel2DVar v)
+    Kernel2DTermLit _ -> Set.empty
+
+axisTermVars :: AxisTerm -> Set Var
+axisTermVars at =
+  case at of
+    AxisTermVar v -> Set.singleton (AxisVar v)
+    AxisTermLit _ -> Set.empty
+
+padModeTermVars :: PadModeTerm -> Set Var
+padModeTermVars pt =
+  case pt of
+    PadModeTermVar v -> Set.singleton (PadModeVar v)
+    PadModeTermLit _ -> Set.empty
+
+actiModeTermVars :: ActiModeTerm -> Set Var
+actiModeTermVars at =
+  case at of
+    ActiModeTermVar v -> Set.singleton (ActiModeVar v)
+    ActiModeTermLit _ -> Set.empty
+
 scalarVars :: ScalarTerm -> Set Var
 scalarVars st =
   case st of
-    ScalarVar v -> Set.singleton v
-    ScalarLit _ -> Set.empty
+    ScalarTermVar v -> Set.singleton (ScalarVar v)
+    ScalarTermLit _ -> Set.empty
     ScalarMul a b -> scalarVars a `Set.union` scalarVars b
 
 allUnique :: Ord a => [a] -> Bool
