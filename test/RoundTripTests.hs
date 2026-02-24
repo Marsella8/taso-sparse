@@ -3,7 +3,7 @@ module RoundTripTests
   ) where
 
 import Axioms (axioms)
-import Deserialize (fromSExprString)
+import Deserialize (fromSExprString, load)
 import IR.IR
 import IR.Utils
 import Serialize (SExprSerialize(..), renderSExpr)
@@ -88,3 +88,13 @@ runRoundTripTests = do
           (fromSExprString (renderSExpr (toSExpr rw)) :: Maybe Rewrite)
     )
     (zip [1 :: Int ..] axioms)
+
+  substitutions <- load "data/substitutions.sexp" :: IO [Rewrite]
+  mapM_
+    ( \(i, rw) ->
+        assertJustEq
+          ("roundtrip substitution #" ++ show i)
+          rw
+          (fromSExprString (renderSExpr (toSExpr rw)) :: Maybe Rewrite)
+    )
+    (zip [1 :: Int ..] substitutions)
