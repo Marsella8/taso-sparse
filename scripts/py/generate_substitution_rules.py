@@ -60,6 +60,11 @@ def generate_substitution_sexpr() -> tuple[str, int]:
             '#pragma once\n#include "taso/ops.h"\nnamespace XFlow = taso;\n',
             encoding="utf-8",
         )
+    generator_cc = gen / "generator.cc"
+    src = generator_cc.read_text(encoding="utf-8")
+    src = src.replace("if (depth >= 3) return;", "if (depth >= 4) return;")
+    generator_cc.write_text(src, encoding="utf-8")
+
     _run(["protoc", "--cpp_out=src/generator", "--proto_path=src/core", "src/core/rules.proto"], cwd=repo)
     _run(["protoc", "--python_out=src/core", "--proto_path=src/core", "src/core/rules.proto"], cwd=repo)
 

@@ -314,13 +314,61 @@ def _rule_to_rewrite(rule: Rule) -> str:
     return f"(rewrite {src_graph} {dst_graph} {input_bimap} {output_bimap})"
 
 
-# --- main :) ---
+# --- val ---
+
+OP_NAMES: dict[int, str] = {
+    3: "conv2d", 6: "pool2d-max", 7: "pool2d-avg", 8: "relu",
+    12: "concat", 13: "split", 15: "transpose", 16: "ewadd",
+    17: "ewmul", 18: "matmul", 19: "mul", 20: "enlarge",
+    22: "const-imm", 23: "const-iconv", 24: "const-one", 25: "const-pool",
+}
+
+
+def _expected_asst_count(ops: list[Op]) -> int:
+    return sum(2 if op.type == 13 else 1 for op in ops)
+
+
+def _check_rule(idx: int, rule: Rule) -> None:
+    src_lookup = _assign_names(rule.srcOp, "s")
+    dst_lookup = _assign_names(rule.dstOp, "d")
+
+    src_free = _free_inputs(rule.srcOp)
+    dst_free = _free_inputs(rule.dstOp)
+    shared = src_free & dst_free
+
+    src_assts = _expected_asst_count(rule.srcOp)
+    dst_assts = _expected_asst_count(rule.dstOp)
+    if src_assts != len(src_lookup):
+        raise ValueError(f"rule {idx}: src lookup size {len(src_lookup)} != expected {src_assts}")
+    if dst_assts != len(dst_lookup):
+        raise ValueError(f"rule {idx}: dst lookup size {len(dst_lookup)} != expected {dst_assts}")
+
+    for mo in rule.mappedOutput:
+        if (mo.srcOpId, mo.srcTsId) not in src_lookup:
+            raise ValueError(f"rule {idx}: mappedOutput src ({mo.srcOpId},{mo.srcTsId}) not in src lookup")
+        if (mo.dstOpId, mo.dstTsId) not in dst_lookup:
+            raise ValueError(f"rule {idx}: mappedOutput dst ({mo.dstOpId},{mo.dstTsId}) not in dst lookup")
+
+    for op in rule.srcOp + rule.dstOp:
+        if op.type not in OP_NAMES:
+            raise ValueError(f"rule {idx}: unknown op type {op.type}")
+        for inp in op.input:
+            if inp.opId >= 0:
+                continue
+            if inp.opId not in shared and inp.opId in dst_free and inp.opId in src_free:
+                raise ValueError(f"rule {idx}: free input {inp.opId} in both sides but not in shared")
+
+
+# --- main ---
 
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     text = (repo_root / RULES_PATH).read_text(encoding="utf-8")
     rules = _parse_rules(text)
+
+    for i, rule in enumerate(rules):
+        _check_rule(i, rule)
 
     lines: list[str] = []
     seen: set[str] = set()
@@ -333,7 +381,7 @@ def main() -> None:
     out = repo_root / OUTPUT_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Wrote {len(lines)} substitutions (from {len(rules)} rules) to {out}")
+    print(f"Checked {len(rules)} rules, wrote {len(lines)} substitutions to {out}")
 
 
 if __name__ == "__main__":
