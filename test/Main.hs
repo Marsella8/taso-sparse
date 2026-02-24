@@ -1,6 +1,7 @@
 module Main (main) where
 
 import DeserializeTests (runDeserializeTests)
+import RewriteTests (runRewriteTests)
 import RoundTripTests (runRoundTripTests)
 import SerializeTests (runSerializeTests)
 
@@ -9,4 +10,5 @@ main = do
   runSerializeTests
   runDeserializeTests
   runRoundTripTests
-  putStrLn "All serialization/deserialization tests passed."
+  runRewriteTests
+  putStrLn "All tests passed."
