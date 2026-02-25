@@ -1,9 +1,11 @@
 module Rewrite
   ( Match(..)
+  , LitVal(..)
   , match
   , apply
   , Derivation
   , Lookup
+  , MatchState
   , matchFrom
   , matchExpr
   ) where
@@ -14,14 +16,26 @@ import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import IR.IR
 
-newtype Match = Match
-  { matchMap :: Bimap
+data LitVal
+  = LitKernel2D Kernel2DLiteral
+  | LitStride2D Stride2DLiteral
+  | LitPadMode PadMode
+  | LitActiMode ActiMode
+  | LitAxis AxisLiteral
+  | LitScalar ScalarTerm
+  deriving (Eq, Ord, Show)
+
+data Match = Match
+  { matchMap  :: Bimap
+  , matchLits :: Map.Map Var LitVal
   }
   deriving (Eq, Ord, Show)
 
 type Derivation = [(Rewrite, Match)]
 
 type Lookup = Map.Map Tensor Expr
+
+type MatchState = (Bi.Bimap Var Var, Map.Map Var LitVal)
 
 match :: Graph -> Rewrite -> [Match]
 match target rule =
@@ -33,10 +47,10 @@ match target rule =
       srcBound = Set.fromList [t | (t, _) <- graphBindings srcGraph]
       srcOutputs = graphOutputVars srcGraph
       srcInternals = srcBound Set.\\ srcOutputs
-  in [ Match bm
+  in [ Match bm lm
      | patOut <- patOutputs
      , (tgtOut, _) <- tgtBindings
-     , bm <- matchFrom patLookup tgtLookup Bi.empty patOut tgtOut
+     , (bm, lm) <- matchFrom patLookup tgtLookup (Bi.empty, Map.empty) patOut tgtOut
      , cleanExtraction bm srcInternals tgtBindings
      ]
 
@@ -53,115 +67,146 @@ cleanExtraction bm srcInternals tgtBindings =
     nonMatchedExprs = [e | (t, e) <- tgtBindings, not (Set.member t matchedTargets)]
     externallyReferenced = Set.unions (map exprTensorVars nonMatchedExprs) `Set.intersection` matchedInternals
 
-matchFrom :: Lookup -> Lookup -> Bi.Bimap Var Var -> Tensor -> Tensor -> [Bi.Bimap Var Var]
-matchFrom patLookup tgtLookup bm patT tgtT =
+matchFrom :: Lookup -> Lookup -> MatchState -> Tensor -> Tensor -> [MatchState]
+matchFrom patLookup tgtLookup ms@(bm, _) patT tgtT =
   case bindVar bm (TensorVar patT) (TensorVar tgtT) of
     Nothing -> []
     Just bm'
-      | alreadyBound -> [bm']
+      | alreadyBound -> [ms']
       | otherwise ->
           case (Map.lookup patT patLookup, Map.lookup tgtT tgtLookup) of
-            (Nothing, _) -> [bm']
-            (Just patExpr, Just tgtExpr) -> matchExpr patLookup tgtLookup bm' patExpr tgtExpr
+            (Nothing, _) -> [ms']
+            (Just patExpr, Just tgtExpr) -> matchExpr patLookup tgtLookup ms' patExpr tgtExpr
             (Just _, Nothing) -> []
       where
         alreadyBound = Bi.memberR (TensorVar tgtT) bm
+        ms' = (bm', snd ms)
 
-matchExpr :: Lookup -> Lookup -> Bi.Bimap Var Var -> Expr -> Expr -> [Bi.Bimap Var Var]
-matchExpr patLookup tgtLookup bm patExpr tgtExpr =
+matchExpr :: Lookup -> Lookup -> MatchState -> Expr -> Expr -> [MatchState]
+matchExpr patLookup tgtLookup ms patExpr tgtExpr =
   case (patExpr, tgtExpr) of
     (Conv2D pk ps pp pc px py, Conv2D tk ts tp tc tx ty) ->
-      matchConvParams pk ps pp pc tk ts tp tc bm >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx >>= \bm2 ->
-      matchFrom patLookup tgtLookup bm2 py ty
+      matchConvParams pk ps pp pc tk ts tp tc ms >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx >>= \ms2 ->
+      matchFrom patLookup tgtLookup ms2 py ty
     (Pool2DAvg pk ps pp px, Pool2DAvg tk ts tp tx) ->
-      matchPoolParams pk ps pp tk ts tp bm >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
+      matchPoolParams pk ps pp tk ts tp ms >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
     (Pool2DMax pk ps pp px, Pool2DMax tk ts tp tx) ->
-      matchPoolParams pk ps pp tk ts tp bm >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
-    (Relu px, Relu tx) -> matchFrom patLookup tgtLookup bm px tx
-    (Sigmoid px, Sigmoid tx) -> matchFrom patLookup tgtLookup bm px tx
-    (Tanh px, Tanh tx) -> matchFrom patLookup tgtLookup bm px tx
+      matchPoolParams pk ps pp tk ts tp ms >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
+    (Relu px, Relu tx) -> matchFrom patLookup tgtLookup ms px tx
+    (Sigmoid px, Sigmoid tx) -> matchFrom patLookup tgtLookup ms px tx
+    (Tanh px, Tanh tx) -> matchFrom patLookup tgtLookup ms px tx
     (MatMul px py, MatMul tx ty) ->
-      matchFrom patLookup tgtLookup bm px tx >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 py ty
+      matchFrom patLookup tgtLookup ms px tx >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 py ty
     (EwAdd px py, EwAdd tx ty) ->
-      matchFrom patLookup tgtLookup bm px tx >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 py ty
+      matchFrom patLookup tgtLookup ms px tx >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 py ty
     (EwMul px py, EwMul tx ty) ->
-      matchFrom patLookup tgtLookup bm px tx >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 py ty
+      matchFrom patLookup tgtLookup ms px tx >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 py ty
     (Mul px ps, Mul tx ts) ->
-      matchScalar bm ps ts >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
-    (Transpose px, Transpose tx) -> matchFrom patLookup tgtLookup bm px tx
+      matchScalar ms ps ts >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
+    (Transpose px, Transpose tx) -> matchFrom patLookup tgtLookup ms px tx
     (Concat pa px py, Concat ta tx ty) ->
-      matchAxis bm pa ta >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx >>= \bm2 ->
-      matchFrom patLookup tgtLookup bm2 py ty
+      matchAxis ms pa ta >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx >>= \ms2 ->
+      matchFrom patLookup tgtLookup ms2 py ty
     (Split0 pa px, Split0 ta tx) ->
-      matchAxis bm pa ta >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
+      matchAxis ms pa ta >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
     (Split1 pa px, Split1 ta tx) ->
-      matchAxis bm pa ta >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
+      matchAxis ms pa ta >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
     (Enlarge pk px, Enlarge tk tx) ->
-      matchKernel2D bm pk tk >>= \bm1 ->
-      matchFrom patLookup tgtLookup bm1 px tx
-    (ConstPool pk, ConstPool tk) -> matchKernel2D bm pk tk
-    (ConstIConv pk, ConstIConv tk) -> matchKernel2D bm pk tk
-    (ConstImm, ConstImm) -> [bm]
-    (ConstOne, ConstOne) -> [bm]
+      matchKernel2D ms pk tk >>= \ms1 ->
+      matchFrom patLookup tgtLookup ms1 px tx
+    (ConstPool pk, ConstPool tk) -> matchKernel2D ms pk tk
+    (ConstIConv pk, ConstIConv tk) -> matchKernel2D ms pk tk
+    (ConstImm, ConstImm) -> [ms]
+    (ConstOne, ConstOne) -> [ms]
     _ -> []
 
 matchConvParams :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> ActiModeTerm
       -> Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> ActiModeTerm
-      -> Bi.Bimap Var Var -> [Bi.Bimap Var Var]
-matchConvParams pk ps pp pc tk ts tp tc bm =
-  matchKernel2D bm pk tk >>= \bm1 ->
-  matchStride2D bm1 ps ts >>= \bm2 ->
-  matchPadMode bm2 pp tp >>= \bm3 ->
-  matchActiMode bm3 pc tc
+      -> MatchState -> [MatchState]
+matchConvParams pk ps pp pc tk ts tp tc ms =
+  matchKernel2D ms pk tk >>= \ms1 ->
+  matchStride2D ms1 ps ts >>= \ms2 ->
+  matchPadMode ms2 pp tp >>= \ms3 ->
+  matchActiMode ms3 pc tc
 
 matchPoolParams :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm
       -> Kernel2DTerm -> Stride2DTerm -> PadModeTerm
-      -> Bi.Bimap Var Var -> [Bi.Bimap Var Var]
-matchPoolParams pk ps pp tk ts tp bm =
-  matchKernel2D bm pk tk >>= \bm1 ->
-  matchStride2D bm1 ps ts >>= \bm2 ->
-  matchPadMode bm2 pp tp
+      -> MatchState -> [MatchState]
+matchPoolParams pk ps pp tk ts tp ms =
+  matchKernel2D ms pk tk >>= \ms1 ->
+  matchStride2D ms1 ps ts >>= \ms2 ->
+  matchPadMode ms2 pp tp
 
-matchKernel2D :: Bi.Bimap Var Var -> Kernel2DTerm -> Kernel2DTerm -> [Bi.Bimap Var Var]
-matchKernel2D bm (Kernel2DTermVar v) (Kernel2DTermVar u) = maybeToList (bindVar bm (Kernel2DVar v) (Kernel2DVar u))
-matchKernel2D bm (Kernel2DTermLit l) (Kernel2DTermLit m) = [bm | l == m]
+matchKernel2D :: MatchState -> Kernel2DTerm -> Kernel2DTerm -> [MatchState]
+matchKernel2D (bm, lm) (Kernel2DTermVar v) (Kernel2DTermVar u) =
+  case bindVar bm (Kernel2DVar v) (Kernel2DVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchKernel2D ms (Kernel2DTermVar v) (Kernel2DTermLit l) =
+  maybeToList (bindLit ms (Kernel2DVar v) (LitKernel2D l))
+matchKernel2D ms (Kernel2DTermLit l) (Kernel2DTermLit m) = [ms | l == m]
 matchKernel2D _ _ _ = []
 
-matchStride2D :: Bi.Bimap Var Var -> Stride2DTerm -> Stride2DTerm -> [Bi.Bimap Var Var]
-matchStride2D bm (Stride2DTermVar v) (Stride2DTermVar u) = maybeToList (bindVar bm (Stride2DVar v) (Stride2DVar u))
-matchStride2D bm (Stride2DTermLit l) (Stride2DTermLit m) = [bm | l == m]
+matchStride2D :: MatchState -> Stride2DTerm -> Stride2DTerm -> [MatchState]
+matchStride2D (bm, lm) (Stride2DTermVar v) (Stride2DTermVar u) =
+  case bindVar bm (Stride2DVar v) (Stride2DVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchStride2D ms (Stride2DTermVar v) (Stride2DTermLit l) =
+  maybeToList (bindLit ms (Stride2DVar v) (LitStride2D l))
+matchStride2D ms (Stride2DTermLit l) (Stride2DTermLit m) = [ms | l == m]
 matchStride2D _ _ _ = []
 
-matchPadMode :: Bi.Bimap Var Var -> PadModeTerm -> PadModeTerm -> [Bi.Bimap Var Var]
-matchPadMode bm (PadModeTermVar v) (PadModeTermVar u) = maybeToList (bindVar bm (PadModeVar v) (PadModeVar u))
-matchPadMode bm (PadModeTermLit l) (PadModeTermLit m) = [bm | l == m]
+matchPadMode :: MatchState -> PadModeTerm -> PadModeTerm -> [MatchState]
+matchPadMode (bm, lm) (PadModeTermVar v) (PadModeTermVar u) =
+  case bindVar bm (PadModeVar v) (PadModeVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchPadMode ms (PadModeTermVar v) (PadModeTermLit l) =
+  maybeToList (bindLit ms (PadModeVar v) (LitPadMode l))
+matchPadMode ms (PadModeTermLit l) (PadModeTermLit m) = [ms | l == m]
 matchPadMode _ _ _ = []
 
-matchActiMode :: Bi.Bimap Var Var -> ActiModeTerm -> ActiModeTerm -> [Bi.Bimap Var Var]
-matchActiMode bm (ActiModeTermVar v) (ActiModeTermVar u) = maybeToList (bindVar bm (ActiModeVar v) (ActiModeVar u))
-matchActiMode bm (ActiModeTermLit l) (ActiModeTermLit m) = [bm | l == m]
+matchActiMode :: MatchState -> ActiModeTerm -> ActiModeTerm -> [MatchState]
+matchActiMode (bm, lm) (ActiModeTermVar v) (ActiModeTermVar u) =
+  case bindVar bm (ActiModeVar v) (ActiModeVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchActiMode ms (ActiModeTermVar v) (ActiModeTermLit l) =
+  maybeToList (bindLit ms (ActiModeVar v) (LitActiMode l))
+matchActiMode ms (ActiModeTermLit l) (ActiModeTermLit m) = [ms | l == m]
 matchActiMode _ _ _ = []
 
-matchAxis :: Bi.Bimap Var Var -> AxisTerm -> AxisTerm -> [Bi.Bimap Var Var]
-matchAxis bm (AxisTermVar v) (AxisTermVar u) = maybeToList (bindVar bm (AxisVar v) (AxisVar u))
-matchAxis bm (AxisTermLit l) (AxisTermLit m) = [bm | l == m]
+matchAxis :: MatchState -> AxisTerm -> AxisTerm -> [MatchState]
+matchAxis (bm, lm) (AxisTermVar v) (AxisTermVar u) =
+  case bindVar bm (AxisVar v) (AxisVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchAxis ms (AxisTermVar v) (AxisTermLit l) =
+  maybeToList (bindLit ms (AxisVar v) (LitAxis l))
+matchAxis ms (AxisTermLit l) (AxisTermLit m) = [ms | l == m]
 matchAxis _ _ _ = []
 
-matchScalar :: Bi.Bimap Var Var -> ScalarTerm -> ScalarTerm -> [Bi.Bimap Var Var]
-matchScalar bm (ScalarTermVar v) (ScalarTermVar u) = maybeToList (bindVar bm (ScalarVar v) (ScalarVar u))
-matchScalar bm (ScalarTermLit l) (ScalarTermLit m) = [bm | l == m]
-matchScalar bm (ScalarMul pa pb) (ScalarMul ta tb) =
-  matchScalar bm pa ta >>= \bm1 -> matchScalar bm1 pb tb
+matchScalar :: MatchState -> ScalarTerm -> ScalarTerm -> [MatchState]
+matchScalar (bm, lm) (ScalarTermVar v) (ScalarTermVar u) =
+  case bindVar bm (ScalarVar v) (ScalarVar u) of
+    Just bm' -> [(bm', lm)]
+    Nothing -> []
+matchScalar ms (ScalarTermVar v) tgt =
+  maybeToList (bindLit ms (ScalarVar v) (LitScalar tgt))
+matchScalar ms (ScalarTermLit l) (ScalarTermLit m) = [ms | l == m]
+matchScalar ms (ScalarMul pa pb) (ScalarMul ta tb) =
+  matchScalar ms pa ta >>= \ms1 -> matchScalar ms1 pb tb
 matchScalar _ _ _ = []
 
 bindVar :: Bi.Bimap Var Var -> Var -> Var -> Maybe (Bi.Bimap Var Var)
@@ -173,8 +218,16 @@ bindVar bm pv tv =
         then Nothing
         else Just (Bi.insert pv tv bm)
 
+bindLit :: MatchState -> Var -> LitVal -> Maybe MatchState
+bindLit (bm, lm) pv lv =
+  case Map.lookup pv lm of
+    Just lv' -> if lv == lv' then Just (bm, lm) else Nothing
+    Nothing
+      | Bi.member pv bm -> Nothing
+      | otherwise -> Just (bm, Map.insert pv lv lm)
+
 apply :: Graph -> Rewrite -> Match -> Graph
-apply target rule (Match bm) =
+apply target rule (Match bm lm) =
   mustGraph (keptAssts ++ newAssts)
   where
     srcBound = Set.fromList [t | (t, _) <- graphBindings (src rule)]
@@ -229,7 +282,7 @@ apply target rule (Match bm) =
       ]
 
     newAssts =
-      [ Asst (renameTensor renameMap t, renameExpr renameMap e)
+      [ Asst (renameTensor renameMap t, renameExpr renameMap lm e)
       | (t, e) <- graphBindings (dst rule)
       ]
 
@@ -245,74 +298,86 @@ renameTensor rm t =
     Just (TensorVar t') -> t'
     _ -> t
 
-renameKernel2D :: Map.Map Var Var -> Kernel2DTerm -> Kernel2DTerm
-renameKernel2D rm (Kernel2DTermVar v) =
+renameKernel2D :: Map.Map Var Var -> Map.Map Var LitVal -> Kernel2DTerm -> Kernel2DTerm
+renameKernel2D rm lm (Kernel2DTermVar v) =
   case Map.lookup (Kernel2DVar v) rm of
     Just (Kernel2DVar v') -> Kernel2DTermVar v'
-    _ -> Kernel2DTermVar v
-renameKernel2D _ lit = lit
+    _ -> case Map.lookup (Kernel2DVar v) lm of
+      Just (LitKernel2D l) -> Kernel2DTermLit l
+      _ -> Kernel2DTermVar v
+renameKernel2D _ _ lit = lit
 
-renameStride2D :: Map.Map Var Var -> Stride2DTerm -> Stride2DTerm
-renameStride2D rm (Stride2DTermVar v) =
+renameStride2D :: Map.Map Var Var -> Map.Map Var LitVal -> Stride2DTerm -> Stride2DTerm
+renameStride2D rm lm (Stride2DTermVar v) =
   case Map.lookup (Stride2DVar v) rm of
     Just (Stride2DVar v') -> Stride2DTermVar v'
-    _ -> Stride2DTermVar v
-renameStride2D _ lit = lit
+    _ -> case Map.lookup (Stride2DVar v) lm of
+      Just (LitStride2D l) -> Stride2DTermLit l
+      _ -> Stride2DTermVar v
+renameStride2D _ _ lit = lit
 
-renamePadMode :: Map.Map Var Var -> PadModeTerm -> PadModeTerm
-renamePadMode rm (PadModeTermVar v) =
+renamePadMode :: Map.Map Var Var -> Map.Map Var LitVal -> PadModeTerm -> PadModeTerm
+renamePadMode rm lm (PadModeTermVar v) =
   case Map.lookup (PadModeVar v) rm of
     Just (PadModeVar v') -> PadModeTermVar v'
-    _ -> PadModeTermVar v
-renamePadMode _ lit = lit
+    _ -> case Map.lookup (PadModeVar v) lm of
+      Just (LitPadMode l) -> PadModeTermLit l
+      _ -> PadModeTermVar v
+renamePadMode _ _ lit = lit
 
-renameActiMode :: Map.Map Var Var -> ActiModeTerm -> ActiModeTerm
-renameActiMode rm (ActiModeTermVar v) =
+renameActiMode :: Map.Map Var Var -> Map.Map Var LitVal -> ActiModeTerm -> ActiModeTerm
+renameActiMode rm lm (ActiModeTermVar v) =
   case Map.lookup (ActiModeVar v) rm of
     Just (ActiModeVar v') -> ActiModeTermVar v'
-    _ -> ActiModeTermVar v
-renameActiMode _ lit = lit
+    _ -> case Map.lookup (ActiModeVar v) lm of
+      Just (LitActiMode l) -> ActiModeTermLit l
+      _ -> ActiModeTermVar v
+renameActiMode _ _ lit = lit
 
-renameAxis :: Map.Map Var Var -> AxisTerm -> AxisTerm
-renameAxis rm (AxisTermVar v) =
+renameAxis :: Map.Map Var Var -> Map.Map Var LitVal -> AxisTerm -> AxisTerm
+renameAxis rm lm (AxisTermVar v) =
   case Map.lookup (AxisVar v) rm of
     Just (AxisVar v') -> AxisTermVar v'
-    _ -> AxisTermVar v
-renameAxis _ lit = lit
+    _ -> case Map.lookup (AxisVar v) lm of
+      Just (LitAxis l) -> AxisTermLit l
+      _ -> AxisTermVar v
+renameAxis _ _ lit = lit
 
-renameScalar :: Map.Map Var Var -> ScalarTerm -> ScalarTerm
-renameScalar rm (ScalarTermVar v) =
+renameScalar :: Map.Map Var Var -> Map.Map Var LitVal -> ScalarTerm -> ScalarTerm
+renameScalar rm lm (ScalarTermVar v) =
   case Map.lookup (ScalarVar v) rm of
     Just (ScalarVar v') -> ScalarTermVar v'
-    _ -> ScalarTermVar v
-renameScalar rm (ScalarMul sa sb) =
-  ScalarMul (renameScalar rm sa) (renameScalar rm sb)
-renameScalar _ lit = lit
+    _ -> case Map.lookup (ScalarVar v) lm of
+      Just (LitScalar s) -> s
+      _ -> ScalarTermVar v
+renameScalar rm lm (ScalarMul sa sb) =
+  ScalarMul (renameScalar rm lm sa) (renameScalar rm lm sb)
+renameScalar _ _ lit = lit
 
-renameExpr :: Map.Map Var Var -> Expr -> Expr
-renameExpr rm expr =
+renameExpr :: Map.Map Var Var -> Map.Map Var LitVal -> Expr -> Expr
+renameExpr rm lm expr =
   case expr of
     Conv2D ek es ep ec ex ey ->
-      Conv2D (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep)
-        (renameActiMode rm ec) (rt ex) (rt ey)
+      Conv2D (renameKernel2D rm lm ek) (renameStride2D rm lm es) (renamePadMode rm lm ep)
+        (renameActiMode rm lm ec) (rt ex) (rt ey)
     Pool2DAvg ek es ep ex ->
-      Pool2DAvg (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep) (rt ex)
+      Pool2DAvg (renameKernel2D rm lm ek) (renameStride2D rm lm es) (renamePadMode rm lm ep) (rt ex)
     Pool2DMax ek es ep ex ->
-      Pool2DMax (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep) (rt ex)
+      Pool2DMax (renameKernel2D rm lm ek) (renameStride2D rm lm es) (renamePadMode rm lm ep) (rt ex)
     Relu ex -> Relu (rt ex)
     Sigmoid ex -> Sigmoid (rt ex)
     Tanh ex -> Tanh (rt ex)
     MatMul ex ey -> MatMul (rt ex) (rt ey)
     EwAdd ex ey -> EwAdd (rt ex) (rt ey)
     EwMul ex ey -> EwMul (rt ex) (rt ey)
-    Mul ex es -> Mul (rt ex) (renameScalar rm es)
+    Mul ex es -> Mul (rt ex) (renameScalar rm lm es)
     Transpose ex -> Transpose (rt ex)
-    Concat ea ex ey -> Concat (renameAxis rm ea) (rt ex) (rt ey)
-    Split0 ea ex -> Split0 (renameAxis rm ea) (rt ex)
-    Split1 ea ex -> Split1 (renameAxis rm ea) (rt ex)
-    Enlarge ek ex -> Enlarge (renameKernel2D rm ek) (rt ex)
-    ConstPool ek -> ConstPool (renameKernel2D rm ek)
-    ConstIConv ek -> ConstIConv (renameKernel2D rm ek)
+    Concat ea ex ey -> Concat (renameAxis rm lm ea) (rt ex) (rt ey)
+    Split0 ea ex -> Split0 (renameAxis rm lm ea) (rt ex)
+    Split1 ea ex -> Split1 (renameAxis rm lm ea) (rt ex)
+    Enlarge ek ex -> Enlarge (renameKernel2D rm lm ek) (rt ex)
+    ConstPool ek -> ConstPool (renameKernel2D rm lm ek)
+    ConstIConv ek -> ConstIConv (renameKernel2D rm lm ek)
     ConstImm -> ConstImm
     ConstOne -> ConstOne
   where
