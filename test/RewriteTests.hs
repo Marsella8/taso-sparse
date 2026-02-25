@@ -144,15 +144,8 @@ runRewriteTests = do
     (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)]) crRule)
 
   assertEq
-    "shared internal: match still valid"
-    [ Match
-        ( mustBimap
-            [ (TensorVar x, TensorVar inp)
-            , (TensorVar s0, TensorVar ta)
-            , (TensorVar s1, TensorVar tb)
-            ]
-        )
-    ]
+    "shared internal: match rejected"
+    []
     ( match
         (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)])
         ttRule
@@ -299,17 +292,17 @@ runRewriteTests = do
     "chain1 step1: match axiom10"
     [chain1Match1]
     (match chain1Start axiom10)
-  let chain1After1 = apply chain1Start axiom10 chain1Match1
-  assertEq
-    "chain1 step1: apply axiom10"
-    ( mustGraph
+  let chain1Expected1 = mustGraph
         [ Asst (ta, Transpose inp)
         , Asst (Tensor "r0", Transpose ta)
         , Asst (Tensor "r1", Transpose (Tensor "inp2"))
         , Asst (tc, EwAdd (Tensor "r0") (Tensor "r1"))
         ]
-    )
-    chain1After1
+  assertEq
+    "chain1 step1: apply axiom10"
+    chain1Expected1
+    (apply chain1Start axiom10 chain1Match1)
+  let chain1After1 = chain1Expected1
   let chain1Match2 = Match
         ( mustBimap
             [ (TensorVar x, TensorVar inp)
@@ -349,17 +342,17 @@ runRewriteTests = do
     "chain2 step1: match axiom22"
     [chain2Match1]
     (match chain2Start axiom22)
-  let chain2After1 = apply chain2Start axiom22 chain2Match1
-  assertEq
-    "chain2 step1: apply axiom22"
-    ( mustGraph
+  let chain2Expected1 = mustGraph
         [ Asst (tb, Transpose ta)
         , Asst (tc, Relu tb)
         , Asst (Tensor "r0", Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)
         , Asst (ta, Relu (Tensor "r0"))
         ]
-    )
-    chain2After1
+  assertEq
+    "chain2 step1: apply axiom22"
+    chain2Expected1
+    (apply chain2Start axiom22 chain2Match1)
+  let chain2After1 = chain2Expected1
   let chain2Match2 = Match
         ( mustBimap
             [ (TensorVar x, TensorVar ta)

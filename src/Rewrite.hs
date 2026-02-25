@@ -27,11 +27,28 @@ match target rule =
       tgtLookup = Map.fromList (graphBindings target)
       patOutputs = Set.toList (graphOutputVars srcGraph)
       tgtBindings = graphBindings target
+      srcBound = Set.fromList [t | (t, _) <- graphBindings srcGraph]
+      srcOutputs = graphOutputVars srcGraph
+      srcInternals = srcBound Set.\\ srcOutputs
   in [ Match bm
      | patOut <- patOutputs
      , (tgtOut, _) <- tgtBindings
      , bm <- matchFrom patLookup tgtLookup Bi.empty patOut tgtOut
+     , cleanExtraction bm srcInternals tgtBindings
      ]
+
+cleanExtraction :: Bi.Bimap Var Var -> Set.Set Tensor -> [(Tensor, Expr)] -> Bool
+cleanExtraction bm srcInternals tgtBindings =
+  Set.null externallyReferenced
+  where
+    matchedInternals = Set.fromList
+      [ tgtT
+      | srcT <- Set.toList srcInternals
+      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
+      ]
+    matchedTargets = Set.fromList [tgtT | (_, TensorVar tgtT) <- Bi.toList bm]
+    nonMatchedExprs = [e | (t, e) <- tgtBindings, not (Set.member t matchedTargets)]
+    externallyReferenced = Set.unions (map exprTensorVars nonMatchedExprs) `Set.intersection` matchedInternals
 
 matchFrom :: Lookup -> Lookup -> Bi.Bimap Var Var -> Tensor -> Tensor -> [Bi.Bimap Var Var]
 matchFrom patLookup tgtLookup bm patT tgtT =
