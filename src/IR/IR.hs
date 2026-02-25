@@ -30,6 +30,7 @@ module IR.IR
   , graphBindings
   , graphFreeVars
   , graphOutputVars
+  , exprTensorVars
   , Bimap
   , mkBimap
   , mustBimap
