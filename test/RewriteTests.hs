@@ -2,6 +2,7 @@ module RewriteTests
   ( runRewriteTests
   ) where
 
+import Axioms (axioms)
 import Data.List (sort)
 import IR.IR
 import IR.Utils
@@ -275,3 +276,108 @@ runRewriteTests = do
         ]
     )
     (apply target5 crRule match5)
+
+  let axiom9 = axioms !! 8
+      axiom10 = axioms !! 9
+      axiom22 = axioms !! 21
+      axiom23 = axioms !! 22
+
+  let chain1Start = mustGraph
+        [ Asst (ta, Transpose inp)
+        , Asst (tb, EwAdd ta (Tensor "inp2"))
+        , Asst (tc, Transpose tb)
+        ]
+  let chain1Match1 = Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar ta)
+            , (TensorVar y, TensorVar (Tensor "inp2"))
+            , (TensorVar s0, TensorVar tb)
+            , (TensorVar s1, TensorVar tc)
+            ]
+        )
+  assertEq
+    "chain1 step1: match axiom10"
+    [chain1Match1]
+    (match chain1Start axiom10)
+  let chain1After1 = apply chain1Start axiom10 chain1Match1
+  assertEq
+    "chain1 step1: apply axiom10"
+    ( mustGraph
+        [ Asst (ta, Transpose inp)
+        , Asst (Tensor "r0", Transpose ta)
+        , Asst (Tensor "r1", Transpose (Tensor "inp2"))
+        , Asst (tc, EwAdd (Tensor "r0") (Tensor "r1"))
+        ]
+    )
+    chain1After1
+  let chain1Match2 = Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar inp)
+            , (TensorVar s0, TensorVar ta)
+            , (TensorVar s1, TensorVar (Tensor "r0"))
+            ]
+        )
+  assertEq
+    "chain1 step2: match axiom9"
+    [chain1Match2]
+    (match chain1After1 axiom9)
+  assertEq
+    "chain1 step2: apply axiom9"
+    ( mustGraph
+        [ Asst (Tensor "r1", Transpose (Tensor "inp2"))
+        , Asst (tc, EwAdd inp (Tensor "r1"))
+        ]
+    )
+    (apply chain1After1 axiom9 chain1Match2)
+
+  let chain2Start = mustGraph
+        [ Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActRelu) inp wt)
+        , Asst (tb, Transpose ta)
+        , Asst (tc, Relu tb)
+        ]
+  let chain2Match1 = Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar inp)
+            , (TensorVar y, TensorVar wt)
+            , (TensorVar s0, TensorVar ta)
+            , (Kernel2DVar (Kernel2DVariable "k"), Kernel2DVar (Kernel2DVariable "myK"))
+            , (Stride2DVar (Stride2DVariable "s"), Stride2DVar (Stride2DVariable "myS"))
+            , (PadModeVar (PadModeVariable "p"), PadModeVar (PadModeVariable "myP"))
+            ]
+        )
+  assertEq
+    "chain2 step1: match axiom22"
+    [chain2Match1]
+    (match chain2Start axiom22)
+  let chain2After1 = apply chain2Start axiom22 chain2Match1
+  assertEq
+    "chain2 step1: apply axiom22"
+    ( mustGraph
+        [ Asst (tb, Transpose ta)
+        , Asst (tc, Relu tb)
+        , Asst (Tensor "r0", Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)
+        , Asst (ta, Relu (Tensor "r0"))
+        ]
+    )
+    chain2After1
+  let chain2Match2 = Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar ta)
+            , (TensorVar s0, TensorVar tb)
+            , (TensorVar s1, TensorVar tc)
+            ]
+        )
+  assertEq
+    "chain2 step2: match axiom23"
+    [chain2Match2]
+    (match chain2After1 axiom23)
+  assertEq
+    "chain2 step2: apply axiom23"
+    ( mustGraph
+        [ Asst (Tensor "r0", Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)
+        , Asst (ta, Relu (Tensor "r0"))
+        , Asst (Tensor "r1", Relu ta)
+        , Asst (tc, Transpose (Tensor "r1"))
+        ]
+    )
+    (apply chain2After1 axiom23 chain2Match2)
