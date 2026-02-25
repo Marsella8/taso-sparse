@@ -8,6 +8,7 @@ module Rewrite
   , MatchState
   , matchFrom
   , matchExpr
+  , redirectExpr
   ) where
 
 import qualified Data.Bimap as Bi

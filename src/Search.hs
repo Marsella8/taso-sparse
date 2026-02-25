@@ -3,6 +3,7 @@ module Search
   , isomorphicGraphs
   , allRewrites
   , bfs
+  , cse
   ) where
 
 import Control.Monad (foldM)
@@ -12,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import IR.IR
-import Rewrite (Derivation, apply, match, matchFrom)
+import Rewrite (Derivation, apply, match, matchFrom, redirectExpr)
 
 reverseRewrite :: Rewrite -> Maybe Rewrite
 reverseRewrite rw
@@ -59,12 +60,30 @@ isomorphicGraphs g1 g2
           (zip outs1 perm)
       ]
 
+cse :: Graph -> Graph
+cse g =
+  case findDuplicate (graphBindings g) of
+    Nothing -> g
+    Just (keep, remove) ->
+      cse (mustGraph
+        [ Asst (t, redirectExpr (Map.singleton remove keep) e)
+        | (t, e) <- graphBindings g
+        , t /= remove
+        ])
+
+findDuplicate :: [(Tensor, Expr)] -> Maybe (Tensor, Tensor)
+findDuplicate [] = Nothing
+findDuplicate ((t, e) : rest) =
+  case [t' | (t', e') <- rest, e' == e] of
+    (t' : _) -> Just (t, t')
+    []        -> findDuplicate rest
+
 allRewrites :: [Rewrite] -> [Rewrite]
 allRewrites rules = rules ++ mapMaybe reverseRewrite rules
 
 bfs :: [Rewrite] -> Graph -> Graph -> Int -> Maybe Derivation
 bfs rules startGraph targetGraph maxDepth =
-  search 0 [(startGraph, [])] [startGraph]
+  search 0 [(cse startGraph, [])] [cse startGraph]
   where
     search depth frontier visited
       | depth > maxDepth = Nothing
@@ -85,7 +104,7 @@ expand rules frontier visited =
   foldl' addIfNew ([], visited) candidates
   where
     candidates =
-      [ (apply g rw m, deriv ++ [(rw, m)])
+      [ (cse (apply g rw m), deriv ++ [(rw, m)])
       | (g, deriv) <- frontier
       , rw <- rules
       , m <- match g rw
