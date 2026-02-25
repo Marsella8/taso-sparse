@@ -116,6 +116,36 @@ runRewriteTests = do
     0
     (length (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)]) crRule))
 
+  let moRule =
+        Rewrite
+          { src = mustGraph [Asst (s0, Transpose x), Asst (s1, Relu y)]
+          , dst = mustGraph [Asst (d0, Transpose x), Asst (d1, Relu y)]
+          , inputMap = mustBimap
+              [(TensorVar x, TensorVar x), (TensorVar y, TensorVar y)]
+          , outputMap = mustBimap
+              [(TensorVar s0, TensorVar d0), (TensorVar s1, TensorVar d1)]
+          }
+
+  assertEq
+    "multi-output: one consistent match"
+    1
+    (length (match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Relu wt)]) moRule))
+
+  assertEq
+    "multi-output: no partial matches when one output missing"
+    0
+    (length (match (mustGraph [Asst (ta, Transpose inp)]) moRule))
+
+  assertEq
+    "shared internal: no safe match"
+    0
+    ( length
+        ( match
+            (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)])
+            ttRule
+        )
+    )
+
   let target1 = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu tb)]
   let ms2 = match target1 ttRule
   assertEq
