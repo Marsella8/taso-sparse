@@ -154,4 +154,171 @@ bindVar bm pv tv =
         else Just (Bi.insert pv tv bm)
 
 apply :: Graph -> Rewrite -> Match -> Graph
-apply _target _rule _m = undefined
+apply target rule (Match bm) =
+  mustGraph (keptAssts ++ newAssts)
+  where
+    srcBound = Set.fromList [t | (t, _) <- graphBindings (src rule)]
+    dstBound = Set.fromList [t | (t, _) <- graphBindings (dst rule)]
+
+    matchedTensors = Set.fromList
+      [ tgtT
+      | srcT <- Set.toList srcBound
+      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
+      ]
+
+    inputRenames =
+      [ (dstV, tgtV)
+      | (srcV, dstV) <- Bi.toList (inputMap rule)
+      , Just tgtV <- [Bi.lookup srcV bm]
+      ]
+
+    outputRenames =
+      [ (dstV, tgtV)
+      | (srcV, dstV) <- Bi.toList (outputMap rule)
+      , case dstV of { TensorVar t -> Set.member t dstBound; _ -> False }
+      , Just tgtV <- [Bi.lookup srcV bm]
+      ]
+
+    dstOutputTensors = Set.fromList
+      [ t | (_, TensorVar t) <- Bi.toList (outputMap rule) ]
+    internalDstTensors = Set.toList (dstBound Set.\\ dstOutputTensors)
+
+    usedNames = Set.fromList $
+      concatMap (\(t, e) -> tensorName t : map tensorName (Set.toList (exprTensorVars e)))
+        (graphBindings target)
+    freshNames =
+      [ Tensor name
+      | i <- [0 :: Int ..]
+      , let name = "r" ++ show i
+      , not (Set.member name usedNames)
+      ]
+    internalRenames = zipWith
+      (\t f -> (TensorVar t, TensorVar f))
+      internalDstTensors
+      freshNames
+
+    renameMap = Map.fromList (inputRenames ++ outputRenames ++ internalRenames)
+
+    redirectMap = Map.fromList
+      [ (tgtT, renamedT)
+      | (srcV, dstV) <- Bi.toList (outputMap rule)
+      , let renamedV = Map.findWithDefault dstV dstV renameMap
+      , Just (TensorVar tgtT) <- [Bi.lookup srcV bm]
+      , TensorVar renamedT <- [renamedV]
+      , tgtT /= renamedT
+      ]
+
+    newAssts =
+      [ Asst (renameTensor renameMap t, renameExpr renameMap e)
+      | (t, e) <- graphBindings (dst rule)
+      ]
+
+    keptAssts =
+      [ Asst (t, redirectExpr redirectMap e)
+      | (t, e) <- graphBindings target
+      , not (Set.member t matchedTensors)
+      ]
+
+renameTensor :: Map.Map Var Var -> Tensor -> Tensor
+renameTensor rm t =
+  case Map.lookup (TensorVar t) rm of
+    Just (TensorVar t') -> t'
+    _ -> t
+
+renameKernel2D :: Map.Map Var Var -> Kernel2DTerm -> Kernel2DTerm
+renameKernel2D rm (Kernel2DTermVar v) =
+  case Map.lookup (Kernel2DVar v) rm of
+    Just (Kernel2DVar v') -> Kernel2DTermVar v'
+    _ -> Kernel2DTermVar v
+renameKernel2D _ lit = lit
+
+renameStride2D :: Map.Map Var Var -> Stride2DTerm -> Stride2DTerm
+renameStride2D rm (Stride2DTermVar v) =
+  case Map.lookup (Stride2DVar v) rm of
+    Just (Stride2DVar v') -> Stride2DTermVar v'
+    _ -> Stride2DTermVar v
+renameStride2D _ lit = lit
+
+renamePadMode :: Map.Map Var Var -> PadModeTerm -> PadModeTerm
+renamePadMode rm (PadModeTermVar v) =
+  case Map.lookup (PadModeVar v) rm of
+    Just (PadModeVar v') -> PadModeTermVar v'
+    _ -> PadModeTermVar v
+renamePadMode _ lit = lit
+
+renameActiMode :: Map.Map Var Var -> ActiModeTerm -> ActiModeTerm
+renameActiMode rm (ActiModeTermVar v) =
+  case Map.lookup (ActiModeVar v) rm of
+    Just (ActiModeVar v') -> ActiModeTermVar v'
+    _ -> ActiModeTermVar v
+renameActiMode _ lit = lit
+
+renameAxis :: Map.Map Var Var -> AxisTerm -> AxisTerm
+renameAxis rm (AxisTermVar v) =
+  case Map.lookup (AxisVar v) rm of
+    Just (AxisVar v') -> AxisTermVar v'
+    _ -> AxisTermVar v
+renameAxis _ lit = lit
+
+renameScalar :: Map.Map Var Var -> ScalarTerm -> ScalarTerm
+renameScalar rm (ScalarTermVar v) =
+  case Map.lookup (ScalarVar v) rm of
+    Just (ScalarVar v') -> ScalarTermVar v'
+    _ -> ScalarTermVar v
+renameScalar rm (ScalarMul sa sb) =
+  ScalarMul (renameScalar rm sa) (renameScalar rm sb)
+renameScalar _ lit = lit
+
+renameExpr :: Map.Map Var Var -> Expr -> Expr
+renameExpr rm expr =
+  case expr of
+    Conv2D ek es ep ec ex ey ->
+      Conv2D (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep)
+        (renameActiMode rm ec) (rt ex) (rt ey)
+    Pool2DAvg ek es ep ex ->
+      Pool2DAvg (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep) (rt ex)
+    Pool2DMax ek es ep ex ->
+      Pool2DMax (renameKernel2D rm ek) (renameStride2D rm es) (renamePadMode rm ep) (rt ex)
+    Relu ex -> Relu (rt ex)
+    Sigmoid ex -> Sigmoid (rt ex)
+    Tanh ex -> Tanh (rt ex)
+    MatMul ex ey -> MatMul (rt ex) (rt ey)
+    EwAdd ex ey -> EwAdd (rt ex) (rt ey)
+    EwMul ex ey -> EwMul (rt ex) (rt ey)
+    Mul ex es -> Mul (rt ex) (renameScalar rm es)
+    Transpose ex -> Transpose (rt ex)
+    Concat ea ex ey -> Concat (renameAxis rm ea) (rt ex) (rt ey)
+    Split0 ea ex -> Split0 (renameAxis rm ea) (rt ex)
+    Split1 ea ex -> Split1 (renameAxis rm ea) (rt ex)
+    Enlarge ek ex -> Enlarge (renameKernel2D rm ek) (rt ex)
+    ConstPool ek -> ConstPool (renameKernel2D rm ek)
+    ConstIConv ek -> ConstIConv (renameKernel2D rm ek)
+    ConstImm -> ConstImm
+    ConstOne -> ConstOne
+  where
+    rt = renameTensor rm
+
+redirectExpr :: Map.Map Tensor Tensor -> Expr -> Expr
+redirectExpr rm expr =
+  case expr of
+    Conv2D ek es ep ec ex ey -> Conv2D ek es ep ec (rt ex) (rt ey)
+    Pool2DAvg ek es ep ex -> Pool2DAvg ek es ep (rt ex)
+    Pool2DMax ek es ep ex -> Pool2DMax ek es ep (rt ex)
+    Relu ex -> Relu (rt ex)
+    Sigmoid ex -> Sigmoid (rt ex)
+    Tanh ex -> Tanh (rt ex)
+    MatMul ex ey -> MatMul (rt ex) (rt ey)
+    EwAdd ex ey -> EwAdd (rt ex) (rt ey)
+    EwMul ex ey -> EwMul (rt ex) (rt ey)
+    Mul ex es -> Mul (rt ex) es
+    Transpose ex -> Transpose (rt ex)
+    Concat ea ex ey -> Concat ea (rt ex) (rt ey)
+    Split0 ea ex -> Split0 ea (rt ex)
+    Split1 ea ex -> Split1 ea (rt ex)
+    Enlarge ek ex -> Enlarge ek (rt ex)
+    ConstPool _ -> expr
+    ConstIConv _ -> expr
+    ConstImm -> expr
+    ConstOne -> expr
+  where
+    rt t = Map.findWithDefault t t rm

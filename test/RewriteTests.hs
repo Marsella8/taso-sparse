@@ -267,11 +267,11 @@ runRewriteTests = do
   assertEq
     "apply conv2d-relu split fan-out"
     ( mustGraph
-        [ Asst (Tensor "r0", Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)
-        , Asst (ta, Relu (Tensor "r0"))
-        , Asst (tb, Transpose ta)
+        [ Asst (tb, Transpose ta)
         , Asst (tc, EwAdd ta tb)
         , Asst (td, Relu tc)
+        , Asst (Tensor "r0", Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)
+        , Asst (ta, Relu (Tensor "r0"))
         ]
     )
     (apply target5 crRule match5)
