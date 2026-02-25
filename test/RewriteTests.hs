@@ -2,11 +2,11 @@ module RewriteTests
   ( runRewriteTests
   ) where
 
-import qualified Data.Bimap as Bi
+import Data.List (sort)
 import IR.IR
 import IR.Utils
-import Rewrite (match, apply, matchMap)
-import TestUtils (assertEq, assertJustEq)
+import Rewrite (Match(..), match, apply)
+import TestUtils (assertEq)
 
 runRewriteTests :: IO ()
 runRewriteTests = do
@@ -60,40 +60,55 @@ runRewriteTests = do
       myS = Stride2DTermVar (Stride2DVariable "myS")
       myP = PadModeTermVar (PadModeVariable "myP")
 
-  let ms1 = match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta)]) ttRule
   assertEq
-    "transpose-transpose: match count"
-    1
-    (length ms1)
-
-  let bm1 = matchMap (head ms1)
-  assertJustEq
-    "transpose-transpose: x -> inp"
-    (TensorVar inp)
-    (Bi.lookup (TensorVar x) bm1)
-  assertJustEq
-    "transpose-transpose: s0 -> a"
-    (TensorVar ta)
-    (Bi.lookup (TensorVar s0) bm1)
-  assertJustEq
-    "transpose-transpose: s1 -> b"
-    (TensorVar tb)
-    (Bi.lookup (TensorVar s1) bm1)
+    "transpose-transpose"
+    [ Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar inp)
+            , (TensorVar s0, TensorVar ta)
+            , (TensorVar s1, TensorVar tb)
+            ]
+        )
+    ]
+    (match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta)]) ttRule)
 
   assertEq
-    "ewadd-commute: match count"
-    1
-    (length (match (mustGraph [Asst (ta, EwAdd x y)]) ecRule))
+    "ewadd-commute"
+    [ Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar x)
+            , (TensorVar y, TensorVar y)
+            , (TensorVar s0, TensorVar ta)
+            ]
+        )
+    ]
+    (match (mustGraph [Asst (ta, EwAdd x y)]) ecRule)
 
   assertEq
     "no match: transpose-transpose vs relu"
-    0
-    (length (match (mustGraph [Asst (ta, Relu inp)]) ttRule))
+    []
+    (match (mustGraph [Asst (ta, Relu inp)]) ttRule)
 
   assertEq
     "multiple transpose-transpose matches"
-    2
-    ( length
+    ( sort
+        [ Match
+            ( mustBimap
+                [ (TensorVar x, TensorVar (Tensor "inp1"))
+                , (TensorVar s0, TensorVar ta)
+                , (TensorVar s1, TensorVar tb)
+                ]
+            )
+        , Match
+            ( mustBimap
+                [ (TensorVar x, TensorVar (Tensor "inp2"))
+                , (TensorVar s0, TensorVar tc)
+                , (TensorVar s1, TensorVar td)
+                ]
+            )
+        ]
+    )
+    ( sort
         ( match
             ( mustGraph
                 [ Asst (ta, Transpose (Tensor "inp1"))
@@ -107,14 +122,24 @@ runRewriteTests = do
     )
 
   assertEq
-    "conv2d relu: 1 match"
-    1
-    (length (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActRelu) inp wt)]) crRule))
+    "conv2d relu"
+    [ Match
+        ( mustBimap
+            [ (TensorVar x, TensorVar inp)
+            , (TensorVar y, TensorVar wt)
+            , (TensorVar s0, TensorVar ta)
+            , (Kernel2DVar (Kernel2DVariable "k"), Kernel2DVar (Kernel2DVariable "myK"))
+            , (Stride2DVar (Stride2DVariable "s"), Stride2DVar (Stride2DVariable "myS"))
+            , (PadModeVar (PadModeVariable "p"), PadModeVar (PadModeVariable "myP"))
+            ]
+        )
+    ]
+    (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActRelu) inp wt)]) crRule)
 
   assertEq
     "conv2d none vs relu rule: no match"
-    0
-    (length (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)]) crRule))
+    []
+    (match (mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActNone) inp wt)]) crRule)
 
   let moRule =
         Rewrite
@@ -128,48 +153,54 @@ runRewriteTests = do
 
   assertEq
     "multi-output: one consistent match"
-    1
-    (length (match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Relu wt)]) moRule))
+    [ Match
+        ( mustBimap
+            [ (TensorVar s0, TensorVar ta)
+            , (TensorVar s1, TensorVar tb)
+            , (TensorVar x, TensorVar inp)
+            , (TensorVar y, TensorVar wt)
+            ]
+        )
+    ]
+    (match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Relu wt)]) moRule)
 
   assertEq
     "multi-output: no partial matches when one output missing"
-    0
-    (length (match (mustGraph [Asst (ta, Transpose inp)]) moRule))
+    []
+    (match (mustGraph [Asst (ta, Transpose inp)]) moRule)
 
   assertEq
     "shared internal: no safe match"
-    0
-    ( length
-        ( match
-            (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)])
-            ttRule
-        )
+    []
+    ( match
+        (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)])
+        ttRule
     )
 
   let target1 = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu tb)]
-  let ms2 = match target1 ttRule
+  let ms1 = match target1 ttRule
   assertEq
     "apply transpose-transpose: match count"
     1
-    (length ms2)
+    (length ms1)
   assertEq
     "apply transpose-transpose"
     (mustGraph [Asst (tc, Relu inp)])
-    (apply target1 ttRule (head ms2))
+    (apply target1 ttRule (head ms1))
 
   let target2 = mustGraph [Asst (ta, EwAdd x y)]
-  let ms3 = match target2 ecRule
+  let ms2 = match target2 ecRule
   assertEq
     "apply ewadd-commute"
     (mustGraph [Asst (ta, EwAdd y x)])
-    (apply target2 ecRule (head ms3))
+    (apply target2 ecRule (head ms2))
 
   let target3 = mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActRelu) inp wt), Asst (tb, Relu ta)]
-  let ms4 = match target3 crRule
+  let ms3 = match target3 crRule
   assertEq
     "apply conv2d-relu split: match count"
     1
-    (length ms4)
+    (length ms3)
   assertEq
     "apply conv2d-relu split"
     ( mustGraph
@@ -178,4 +209,4 @@ runRewriteTests = do
         , Asst (ta, Relu (Tensor "r0"))
         ]
     )
-    (apply target3 crRule (head ms4))
+    (apply target3 crRule (head ms3))

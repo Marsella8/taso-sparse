@@ -1,6 +1,5 @@
 module Rewrite
-  ( Match
-  , matchMap
+  ( Match(..)
   , match
   , apply
   , Derivation
