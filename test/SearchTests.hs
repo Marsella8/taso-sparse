@@ -7,7 +7,7 @@ import Data.Maybe (isJust, isNothing, mapMaybe)
 import Deserialize (load)
 import IR.IR
 import IR.Utils
-import Rewrite (Derivation, Match(..), match, apply)
+import Rewrite (Derivation, apply, match)
 import Search (reverseRewrite, isomorphicGraphs, allRewrites, bfs)
 import TestUtils (assertEq)
 
