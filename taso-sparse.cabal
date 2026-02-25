@@ -23,6 +23,7 @@ library
         IR.IR
         IR.Utils
         Rewrite
+        Search
         Serialize
     -- other-modules:
     -- other-extensions:
@@ -52,6 +53,7 @@ test-suite taso-sparse-test
         DeserializeTests
         RewriteTests
         RoundTripTests
+        SearchTests
         SerializeTests
         TestUtils
     -- other-extensions:

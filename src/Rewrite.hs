@@ -3,6 +3,9 @@ module Rewrite
   , match
   , apply
   , Derivation
+  , Lookup
+  , matchFrom
+  , matchExpr
   ) where
 
 import qualified Data.Bimap as Bi
