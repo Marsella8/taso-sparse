@@ -321,13 +321,23 @@ runRewriteTests = do
         crRule
     )
 
+  -- Shared internal
+  let sharedTarget = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)]
+      sharedMatch = noLits
+        ( mustBimap
+            [ (TensorVar x, TensorVar inp)
+            , (TensorVar s0, TensorVar ta)
+            , (TensorVar s1, TensorVar tb)
+            ]
+        )
   assertEq
-    "shared internal: match rejected"
-    []
-    ( match
-        (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)])
-        ttRule
-    )
+    "shared internal: match accepted (ta kept)"
+    [sharedMatch]
+    (match sharedTarget ttRule)
+  assertEq
+    "shared internal: apply keeps ta"
+    (mustGraph [Asst (ta, Transpose inp), Asst (tc, Relu ta)])
+    (apply sharedTarget ttRule sharedMatch)
 
   let target1 = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu tb)]
   let match1 = noLits

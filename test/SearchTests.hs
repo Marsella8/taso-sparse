@@ -2,13 +2,14 @@ module SearchTests
   ( runSearchTests
   ) where
 
+import Augment (augmentedRules)
 import Axioms (axioms)
 import Data.Maybe (isJust, isNothing, mapMaybe)
 import Deserialize (load)
 import IR.IR
 import IR.Utils
 import Rewrite (Derivation, apply, match)
-import Search (reverseRewrite, isomorphicGraphs, allRewrites, bfs)
+import Search (reverseRewrite, isomorphicGraphs, allRewrites, bfs, cse)
 import TestUtils (assertEq)
 
 runSearchTests :: IO ()
@@ -260,7 +261,223 @@ runSearchTests = do
     True
     (isNothing (bfs rules unreachableSrc unreachableDst 4))
 
+  -- ================================================================
+  -- first 10 substitutions
+  -- ================================================================
+
   substitutions <- load "data/substitutions.sexp" :: IO [Rewrite]
+  let augRules = augmentedRules axioms
+
+
+  case bfs augRules (src (substitutions !! 0)) (dst (substitutions !! 0)) 5 of
+    Nothing -> error "sub 0: (t1*t4)*t5 → t1*(t4*t5) must verify via matmul associativity"
+    Just deriv -> assertEq
+      "sub 0: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 0)) deriv)) (dst (substitutions !! 0)))
+
+  
+  case bfs augRules (src (substitutions !! 1)) (dst (substitutions !! 1)) 5 of
+    Nothing -> error "sub 1: (t1*t4)*(t5*t6) → t1*((t4*t5)*t6) must verify via associativity"
+    Just deriv -> assertEq
+      "sub 1: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 1)) deriv)) (dst (substitutions !! 1)))
+
+
+  case bfs augRules (src (substitutions !! 2)) (dst (substitutions !! 2)) 5 of
+    Nothing -> error "sub 2: matmul over concat must verify (needs CSE)"
+    Just deriv -> assertEq
+      "sub 2: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 2)) deriv)) (dst (substitutions !! 2)))
+
+
+  case bfs augRules (src (substitutions !! 3)) (dst (substitutions !! 3)) 5 of
+    Nothing -> error "sub 3: nested matmul associativity must verify"
+    Just deriv -> assertEq
+      "sub 3: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 3)) deriv)) (dst (substitutions !! 3)))
+
+  
+  case bfs augRules (src (substitutions !! 4)) (dst (substitutions !! 4)) 5 of
+    Nothing -> error "sub 4: matmul chain reorder must verify"
+    Just deriv -> assertEq
+      "sub 4: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 4)) deriv)) (dst (substitutions !! 4)))
+
+  case bfs augRules (src (substitutions !! 5)) (dst (substitutions !! 5)) 5 of
+    Nothing -> error "sub 5: matmul distribution over ewadd must verify (shared s0)"
+    Just deriv -> assertEq
+      "sub 5: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 5)) deriv)) (dst (substitutions !! 5)))
+
+  
+  case bfs augRules (src (substitutions !! 6)) (dst (substitutions !! 6)) 5 of
+    Nothing -> error "sub 6: ewadd then matmul distribution must verify"
+    Just deriv -> assertEq
+      "sub 6: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 6)) deriv)) (dst (substitutions !! 6)))
+
+  
+  case bfs augRules (src (substitutions !! 7)) (dst (substitutions !! 7)) 5 of
+    Nothing -> error "sub 7: mul over matmul must verify"
+    Just deriv -> assertEq
+      "sub 7: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 7)) deriv)) (dst (substitutions !! 7)))
+
+  
+  case bfs augRules (src (substitutions !! 8)) (dst (substitutions !! 8)) 5 of
+    Nothing -> error "sub 8: mul matmul reorder must verify"
+    Just deriv -> assertEq
+      "sub 8: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 8)) deriv)) (dst (substitutions !! 8)))
+
+
+  case bfs augRules (src (substitutions !! 9)) (dst (substitutions !! 9)) 5 of
+    Nothing -> error "sub 9: matmul factoring from concat must verify (shared node)"
+    Just deriv -> assertEq
+      "sub 9: replay derivation"
+      True
+      (isomorphicGraphs (cse (replayDerivation (src (substitutions !! 9)) deriv)) (dst (substitutions !! 9)))
+
+  -- ================================================================
+  -- sharing
+  -- ================================================================
+
+  let axiom13 = axioms !! 12
+      axiom15 = axioms !! 14
+
+  let sharedGraph = mustGraph
+        [ Asst (s0, MatMul t1 t4)
+        , Asst (s1, MatMul s0 t5)
+        , Asst (Tensor "s2", EwAdd s0 s1)
+        ]
+  case reverseRewrite axiom13 of
+    Nothing -> error "sharing: axiom 13 must be reversible"
+    Just revAxiom13 ->
+      case match sharedGraph revAxiom13 of
+        [m] -> do
+          let result = apply sharedGraph revAxiom13 m
+              expected = mustGraph
+                [ Asst (s0, MatMul t1 t4)
+                , Asst (Tensor "r0", MatMul t4 t5)
+                , Asst (Tensor "r1", MatMul t1 (Tensor "r0"))
+                , Asst (Tensor "s2", EwAdd s0 (Tensor "r1"))
+                ]
+          assertEq
+            "sharing: apply keeps shared internal"
+            True
+            (isomorphicGraphs result expected)
+        ms -> error ("sharing: expected one match, got " ++ show (length ms))
+
+  let s0p = Tensor "s0p"
+      unsharedGraph = mustGraph
+        [ Asst (s0, MatMul t1 t4)
+        , Asst (s1, MatMul s0 t5)
+        , Asst (s0p, MatMul t1 t4)
+        , Asst (Tensor "s2", EwAdd s0p s1)
+        ]
+  case reverseRewrite axiom13 of
+    Nothing -> error "sharing: axiom 13 must be reversible"
+    Just revAxiom13 ->
+      case match unsharedGraph revAxiom13 of
+        [m] -> do
+          let result = apply unsharedGraph revAxiom13 m
+          assertEq
+            "sharing: unshared apply produces 4 bindings"
+            4
+            (length (graphBindings result))
+          assertEq
+            "sharing: CSE no-op on unshared result"
+            4
+            (length (graphBindings (cse result)))
+        ms -> error ("sharing: expected one match on unshared, got " ++ show (length ms))
+
+  let diamond = mustGraph
+        [ Asst (s0, MatMul t1 t4)
+        , Asst (s1, MatMul s0 t5)
+        , Asst (Tensor "s2", MatMul s0 x)
+        , Asst (Tensor "s3", EwAdd s1 (Tensor "s2"))
+        ]
+  case reverseRewrite axiom13 of
+    Nothing -> error "sharing: axiom 13 must be reversible"
+    Just revAxiom13 ->
+      case match diamond revAxiom13 of
+        m : _ -> do
+          let result = apply diamond revAxiom13 m
+              expected = mustGraph
+                [ Asst (s0, MatMul t1 t4)
+                , Asst (Tensor "r0", MatMul t4 t5)
+                , Asst (Tensor "r1", MatMul t1 (Tensor "r0"))
+                , Asst (Tensor "s2", MatMul s0 x)
+                , Asst (Tensor "s3", EwAdd (Tensor "r1") (Tensor "s2"))
+                ]
+          assertEq
+            "sharing: diamond apply keeps shared s0"
+            True
+            (isomorphicGraphs result expected)
+        [] -> error "sharing: expected at least one match on diamond"
+
+  case reverseRewrite axiom15 of
+    Nothing -> error "sharing: axiom 15 must be reversible"
+    Just revAxiom15 ->
+      case match diamond revAxiom15 of
+        [m] -> do
+          let result = cse (apply diamond revAxiom15 m)
+              expected = mustGraph
+                [ Asst (s0, MatMul t1 t4)
+                , Asst (Tensor "r0", EwAdd t5 x)
+                , Asst (Tensor "r1", MatMul s0 (Tensor "r0"))
+                ]
+          assertEq
+            "sharing: diamond axiom 15 factors matmul out of ewadd"
+            True
+            (isomorphicGraphs result expected)
+        ms -> error ("sharing: expected one match for axiom 15 on diamond, got " ++ show (length ms))
+
+  let dupGraph = mustGraph
+        [ Asst (s0, MatMul t1 t4)
+        , Asst (s1, MatMul s0 t5)
+        , Asst (Tensor "s2", MatMul s0 t5)
+        , Asst (Tensor "s3", EwAdd s1 (Tensor "s2"))
+        ]
+  assertEq
+    "sharing: CSE collapses duplicate matmul"
+    ( mustGraph
+        [ Asst (s0, MatMul t1 t4)
+        , Asst (s1, MatMul s0 t5)
+        , Asst (Tensor "s3", EwAdd s1 s1)
+        ]
+    )
+    (cse dupGraph)
+
+  case reverseRewrite axiom13 of
+    Nothing -> error "sharing: axiom 13 must be reversible"
+    Just revAxiom13 ->
+      case match (src (substitutions !! 5)) revAxiom13 of
+        [m] -> do
+          let afterStep1 = apply (src (substitutions !! 5)) revAxiom13 m
+              sub5Rhs = dst (substitutions !! 5)
+          assertEq
+            "sharing: step 1 result has 4 bindings"
+            4
+            (length (graphBindings afterStep1))
+          case bfs augRules afterStep1 sub5Rhs 1 of
+            Nothing -> error "sharing: bfs from step 1 to Sub 5 RHS must succeed"
+            Just deriv ->
+              assertEq
+                "sharing: step 2 reaches Sub 5 RHS"
+                True
+                (isomorphicGraphs (cse (replayDerivation afterStep1 deriv)) sub5Rhs)
+        ms -> error ("sharing: expected one match on Sub 5 LHS, got " ++ show (length ms))
+
   let results =
         [ (i, bfs rules (src sub) (dst sub) 4)
         | (i, sub) <- zip [1 :: Int ..] substitutions

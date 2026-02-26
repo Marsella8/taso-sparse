@@ -45,28 +45,11 @@ match target rule =
       tgtLookup = Map.fromList (graphBindings target)
       patOutputs = Set.toList (graphOutputVars srcGraph)
       tgtBindings = graphBindings target
-      srcBound = Set.fromList [t | (t, _) <- graphBindings srcGraph]
-      srcOutputs = graphOutputVars srcGraph
-      srcInternals = srcBound Set.\\ srcOutputs
   in [ Match bm lm
      | patOut <- patOutputs
      , (tgtOut, _) <- tgtBindings
      , (bm, lm) <- matchFrom patLookup tgtLookup (Bi.empty, Map.empty) patOut tgtOut
-     , cleanExtraction bm srcInternals tgtBindings
      ]
-
-cleanExtraction :: Bi.Bimap Var Var -> Set.Set Tensor -> [(Tensor, Expr)] -> Bool
-cleanExtraction bm srcInternals tgtBindings =
-  Set.null externallyReferenced
-  where
-    matchedInternals = Set.fromList
-      [ tgtT
-      | srcT <- Set.toList srcInternals
-      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
-      ]
-    matchedTargets = Set.fromList [tgtT | (_, TensorVar tgtT) <- Bi.toList bm]
-    nonMatchedExprs = [e | (t, e) <- tgtBindings, not (Set.member t matchedTargets)]
-    externallyReferenced = Set.unions (map exprTensorVars nonMatchedExprs) `Set.intersection` matchedInternals
 
 matchFrom :: Lookup -> Lookup -> MatchState -> Tensor -> Tensor -> [MatchState]
 matchFrom patLookup tgtLookup ms@(bm, _) patT tgtT =
@@ -233,12 +216,33 @@ apply target rule (Match bm lm) =
   where
     srcBound = Set.fromList [t | (t, _) <- graphBindings (src rule)]
     dstBound = Set.fromList [t | (t, _) <- graphBindings (dst rule)]
+    srcOutputs = graphOutputVars (src rule)
+    srcInternals = srcBound Set.\\ srcOutputs
 
     matchedTensors = Set.fromList
       [ tgtT
       | srcT <- Set.toList srcBound
       , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
       ]
+
+    matchedInternals = Set.fromList
+      [ tgtT
+      | srcT <- Set.toList srcInternals
+      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
+      ]
+
+    toRemove = shrink matchedTensors
+      where
+        shrink candidates =
+          let keptExprs = [e | (t, e) <- graphBindings target
+                             , not (Set.member t candidates)]
+              refs = Set.unions (map exprTensorVars keptExprs)
+              mustKeep = refs `Set.intersection` matchedInternals
+                             `Set.intersection` candidates
+              candidates' = candidates Set.\\ mustKeep
+          in if candidates' == candidates
+             then candidates
+             else shrink candidates'
 
     inputRenames =
       [ (dstV, tgtV)
@@ -290,7 +294,7 @@ apply target rule (Match bm lm) =
     keptAssts =
       [ Asst (t, redirectExpr redirectMap e)
       | (t, e) <- graphBindings target
-      , not (Set.member t matchedTensors)
+      , not (Set.member t toRemove)
       ]
 
 renameTensor :: Map.Map Var Var -> Tensor -> Tensor
