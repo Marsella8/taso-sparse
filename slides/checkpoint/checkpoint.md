@@ -31,8 +31,6 @@
 - Params are terms (var or literal): kernel/stride/pad/activation/axis/scalars.
 - Matching enumerates all consistent unifiers:
   - `match :: Graph -> Rewrite -> [Match]`
-  - seeds: try each `src` output tensor -> each target tensor.
-  - records var→var bindings in `matchMap` and var->literal instantiations in `matchLits`.
 
 
 ---
