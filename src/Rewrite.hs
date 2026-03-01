@@ -7,7 +7,6 @@ module Rewrite
   , Lookup
   , MatchState
   , matchFrom
-  , matchExpr
   , redirectExpr
   ) where
 
@@ -27,7 +26,7 @@ data LitVal
   deriving (Eq, Ord, Show)
 
 data Match = Match
-  { matchMap  :: Bimap
+  { matchMap  :: Map.Map Var Var
   , matchLits :: Map.Map Var LitVal
   }
   deriving (Eq, Ord, Show)
@@ -36,7 +35,7 @@ type Derivation = [(Rewrite, Match)]
 
 type Lookup = Map.Map Tensor Expr
 
-type MatchState = (Bi.Bimap Var Var, Map.Map Var LitVal)
+type MatchState = (Map.Map Var Var, Map.Map Var LitVal)
 
 match :: Graph -> Rewrite -> [Match]
 match target rule =
@@ -45,26 +44,22 @@ match target rule =
       tgtLookup = Map.fromList (graphBindings target)
       patOutputs = Set.toList (graphOutputVars srcGraph)
       tgtBindings = graphBindings target
-  in [ Match bm lm
+  in [ Match vm lm
      | patOut <- patOutputs
      , (tgtOut, _) <- tgtBindings
-     , (bm, lm) <- matchFrom patLookup tgtLookup (Bi.empty, Map.empty) patOut tgtOut
+     , (vm, lm) <- matchFrom patLookup tgtLookup (Map.empty, Map.empty) patOut tgtOut
      ]
 
 matchFrom :: Lookup -> Lookup -> MatchState -> Tensor -> Tensor -> [MatchState]
-matchFrom patLookup tgtLookup ms@(bm, _) patT tgtT =
-  case bindVar bm (TensorVar patT) (TensorVar tgtT) of
+matchFrom patLookup tgtLookup ms@(vm, _) patT tgtT =
+  case bindVar vm (TensorVar patT) (TensorVar tgtT) of
     Nothing -> []
-    Just bm'
-      | alreadyBound -> [ms']
-      | otherwise ->
-          case (Map.lookup patT patLookup, Map.lookup tgtT tgtLookup) of
-            (Nothing, _) -> [ms']
-            (Just patExpr, Just tgtExpr) -> matchExpr patLookup tgtLookup ms' patExpr tgtExpr
-            (Just _, Nothing) -> []
-      where
-        alreadyBound = Bi.memberR (TensorVar tgtT) bm
-        ms' = (bm', snd ms)
+    Just vm' ->
+      let ms' = (vm', snd ms)
+      in case (Map.lookup patT patLookup, Map.lookup tgtT tgtLookup) of
+           (Nothing, _) -> [ms']
+           (Just patExpr, Just tgtExpr) -> matchExpr patLookup tgtLookup ms' patExpr tgtExpr
+           (Just _, Nothing) -> []
 
 matchExpr :: Lookup -> Lookup -> MatchState -> Expr -> Expr -> [MatchState]
 matchExpr patLookup tgtLookup ms patExpr tgtExpr =
@@ -132,9 +127,9 @@ matchPoolParams pk ps pp tk ts tp ms =
   matchPadMode ms2 pp tp
 
 matchKernel2D :: MatchState -> Kernel2DTerm -> Kernel2DTerm -> [MatchState]
-matchKernel2D (bm, lm) (Kernel2DTermVar v) (Kernel2DTermVar u) =
-  case bindVar bm (Kernel2DVar v) (Kernel2DVar u) of
-    Just bm' -> [(bm', lm)]
+matchKernel2D (vm, lm) (Kernel2DTermVar v) (Kernel2DTermVar u) =
+  case bindVar vm (Kernel2DVar v) (Kernel2DVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchKernel2D ms (Kernel2DTermVar v) (Kernel2DTermLit l) =
   maybeToList (bindLit ms (Kernel2DVar v) (LitKernel2D l))
@@ -142,9 +137,9 @@ matchKernel2D ms (Kernel2DTermLit l) (Kernel2DTermLit m) = [ms | l == m]
 matchKernel2D _ _ _ = []
 
 matchStride2D :: MatchState -> Stride2DTerm -> Stride2DTerm -> [MatchState]
-matchStride2D (bm, lm) (Stride2DTermVar v) (Stride2DTermVar u) =
-  case bindVar bm (Stride2DVar v) (Stride2DVar u) of
-    Just bm' -> [(bm', lm)]
+matchStride2D (vm, lm) (Stride2DTermVar v) (Stride2DTermVar u) =
+  case bindVar vm (Stride2DVar v) (Stride2DVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchStride2D ms (Stride2DTermVar v) (Stride2DTermLit l) =
   maybeToList (bindLit ms (Stride2DVar v) (LitStride2D l))
@@ -152,9 +147,9 @@ matchStride2D ms (Stride2DTermLit l) (Stride2DTermLit m) = [ms | l == m]
 matchStride2D _ _ _ = []
 
 matchPadMode :: MatchState -> PadModeTerm -> PadModeTerm -> [MatchState]
-matchPadMode (bm, lm) (PadModeTermVar v) (PadModeTermVar u) =
-  case bindVar bm (PadModeVar v) (PadModeVar u) of
-    Just bm' -> [(bm', lm)]
+matchPadMode (vm, lm) (PadModeTermVar v) (PadModeTermVar u) =
+  case bindVar vm (PadModeVar v) (PadModeVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchPadMode ms (PadModeTermVar v) (PadModeTermLit l) =
   maybeToList (bindLit ms (PadModeVar v) (LitPadMode l))
@@ -162,9 +157,9 @@ matchPadMode ms (PadModeTermLit l) (PadModeTermLit m) = [ms | l == m]
 matchPadMode _ _ _ = []
 
 matchActiMode :: MatchState -> ActiModeTerm -> ActiModeTerm -> [MatchState]
-matchActiMode (bm, lm) (ActiModeTermVar v) (ActiModeTermVar u) =
-  case bindVar bm (ActiModeVar v) (ActiModeVar u) of
-    Just bm' -> [(bm', lm)]
+matchActiMode (vm, lm) (ActiModeTermVar v) (ActiModeTermVar u) =
+  case bindVar vm (ActiModeVar v) (ActiModeVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchActiMode ms (ActiModeTermVar v) (ActiModeTermLit l) =
   maybeToList (bindLit ms (ActiModeVar v) (LitActiMode l))
@@ -172,9 +167,9 @@ matchActiMode ms (ActiModeTermLit l) (ActiModeTermLit m) = [ms | l == m]
 matchActiMode _ _ _ = []
 
 matchAxis :: MatchState -> AxisTerm -> AxisTerm -> [MatchState]
-matchAxis (bm, lm) (AxisTermVar v) (AxisTermVar u) =
-  case bindVar bm (AxisVar v) (AxisVar u) of
-    Just bm' -> [(bm', lm)]
+matchAxis (vm, lm) (AxisTermVar v) (AxisTermVar u) =
+  case bindVar vm (AxisVar v) (AxisVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchAxis ms (AxisTermVar v) (AxisTermLit l) =
   maybeToList (bindLit ms (AxisVar v) (LitAxis l))
@@ -182,9 +177,9 @@ matchAxis ms (AxisTermLit l) (AxisTermLit m) = [ms | l == m]
 matchAxis _ _ _ = []
 
 matchScalar :: MatchState -> ScalarTerm -> ScalarTerm -> [MatchState]
-matchScalar (bm, lm) (ScalarTermVar v) (ScalarTermVar u) =
-  case bindVar bm (ScalarVar v) (ScalarVar u) of
-    Just bm' -> [(bm', lm)]
+matchScalar (vm, lm) (ScalarTermVar v) (ScalarTermVar u) =
+  case bindVar vm (ScalarVar v) (ScalarVar u) of
+    Just vm' -> [(vm', lm)]
     Nothing -> []
 matchScalar ms (ScalarTermVar v) tgt =
   maybeToList (bindLit ms (ScalarVar v) (LitScalar tgt))
@@ -193,25 +188,22 @@ matchScalar ms (ScalarMul pa pb) (ScalarMul ta tb) =
   matchScalar ms pa ta >>= \ms1 -> matchScalar ms1 pb tb
 matchScalar _ _ _ = []
 
-bindVar :: Bi.Bimap Var Var -> Var -> Var -> Maybe (Bi.Bimap Var Var)
-bindVar bm pv tv =
-  case Bi.lookup pv bm of
-    Just tv' -> if tv == tv' then Just bm else Nothing
-    Nothing ->
-      if Bi.memberR tv bm
-        then Nothing
-        else Just (Bi.insert pv tv bm)
+bindVar :: Map.Map Var Var -> Var -> Var -> Maybe (Map.Map Var Var)
+bindVar vm pv tv =
+  case Map.lookup pv vm of
+    Just tv' -> if tv == tv' then Just vm else Nothing
+    Nothing -> Just (Map.insert pv tv vm)
 
 bindLit :: MatchState -> Var -> LitVal -> Maybe MatchState
-bindLit (bm, lm) pv lv =
+bindLit (vm, lm) pv lv =
   case Map.lookup pv lm of
-    Just lv' -> if lv == lv' then Just (bm, lm) else Nothing
+    Just lv' -> if lv == lv' then Just (vm, lm) else Nothing
     Nothing
-      | Bi.member pv bm -> Nothing
-      | otherwise -> Just (bm, Map.insert pv lv lm)
+      | Map.member pv vm -> Nothing
+      | otherwise -> Just (vm, Map.insert pv lv lm)
 
 apply :: Graph -> Rewrite -> Match -> Graph
-apply target rule (Match bm lm) =
+apply target rule (Match vm lm) =
   mustGraph (keptAssts ++ newAssts)
   where
     srcBound = Set.fromList [t | (t, _) <- graphBindings (src rule)]
@@ -222,13 +214,13 @@ apply target rule (Match bm lm) =
     matchedTensors = Set.fromList
       [ tgtT
       | srcT <- Set.toList srcBound
-      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
+      , Just (TensorVar tgtT) <- [Map.lookup (TensorVar srcT) vm]
       ]
 
     matchedInternals = Set.fromList
       [ tgtT
       | srcT <- Set.toList srcInternals
-      , Just (TensorVar tgtT) <- [Bi.lookup (TensorVar srcT) bm]
+      , Just (TensorVar tgtT) <- [Map.lookup (TensorVar srcT) vm]
       ]
 
     toRemove = shrink matchedTensors
@@ -247,14 +239,14 @@ apply target rule (Match bm lm) =
     inputRenames =
       [ (dstV, tgtV)
       | (srcV, dstV) <- Bi.toList (inputMap rule)
-      , Just tgtV <- [Bi.lookup srcV bm]
+      , Just tgtV <- [Map.lookup srcV vm]
       ]
 
     outputRenames =
       [ (dstV, tgtV)
       | (srcV, dstV) <- Bi.toList (outputMap rule)
       , case dstV of { TensorVar t -> Set.member t dstBound; _ -> False }
-      , Just tgtV <- [Bi.lookup srcV bm]
+      , Just tgtV <- [Map.lookup srcV vm]
       ]
 
     dstOutputTensors = Set.fromList
@@ -281,7 +273,7 @@ apply target rule (Match bm lm) =
       [ (tgtT, renamedT)
       | (srcV, dstV) <- Bi.toList (outputMap rule)
       , let renamedV = Map.findWithDefault dstV dstV renameMap
-      , Just (TensorVar tgtT) <- [Bi.lookup srcV bm]
+      , Just (TensorVar tgtT) <- [Map.lookup srcV vm]
       , TensorVar renamedT <- [renamedV]
       , tgtT /= renamedT
       ]

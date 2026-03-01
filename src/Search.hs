@@ -49,12 +49,12 @@ isomorphicGraphs g1 g2
     lookup2 = Map.fromList bs2
     outs1 = Set.toList (graphOutputVars g1)
     outs2 = Set.toList (graphOutputVars g2)
-    seed = (Bi.fromList [(v, v) | v <- Set.toList (graphFreeVars g1)], Map.empty)
+    seed = (Map.fromList [(v, v) | v <- Set.toList (graphFreeVars g1)], Map.empty)
     candidates =
-      [ bm
+      [ vm
       | length outs1 == length outs2
       , perm <- permutations outs2
-      , (bm, _) <- foldM
+      , (vm, _) <- foldM
           (\acc (o1, o2) -> matchFrom lookup1 lookup2 acc o1 o2)
           seed
           (zip outs1 perm)

@@ -10,7 +10,7 @@ import IR.Utils
 import Rewrite (Match(..), LitVal(..), match, apply)
 import TestUtils (assertEq)
 
-noLits :: Bimap -> Match
+noLits :: Map.Map Var Var -> Match
 noLits bm = Match bm Map.empty
 
 runRewriteTests :: IO ()
@@ -20,6 +20,7 @@ runRewriteTests = do
       d0 = Tensor "d0"
       d1 = Tensor "d1"
 
+  -- x.T.T -> x
   let ttRule =
         Rewrite
           { src = mustGraph [Asst (s0, Transpose x), Asst (s1, Transpose s0)]
@@ -28,6 +29,7 @@ runRewriteTests = do
           , outputMap = mustBimap [(TensorVar s1, TensorVar x)]
           }
 
+  -- x + y -> y + x
   let ecRule =
         Rewrite
           { src = mustGraph [Asst (s0, EwAdd x y)]
@@ -69,7 +71,7 @@ runRewriteTests = do
   assertEq
     "transpose-transpose"
     [ noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar tb)
@@ -79,9 +81,40 @@ runRewriteTests = do
     (match (mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta)]) ttRule)
 
   assertEq
+    "transpose-transpose but with multiple overlapping matches"
+    ( sort
+        [ noLits
+            ( Map.fromList
+                [ (TensorVar x, TensorVar inp)
+                , (TensorVar s0, TensorVar ta)
+                , (TensorVar s1, TensorVar tb)
+                ]
+            )
+        , noLits
+            ( Map.fromList
+                [ (TensorVar x, TensorVar ta)
+                , (TensorVar s0, TensorVar tb)
+                , (TensorVar s1, TensorVar tc)
+                ]
+            )
+        ]
+    )
+    ( sort
+        ( match
+            ( mustGraph
+                [ Asst (ta, Transpose inp)
+                , Asst (tb, Transpose ta)
+                , Asst (tc, Transpose tb)
+                ]
+            )
+            ttRule
+        )
+    )
+
+  assertEq
     "ewadd-commute"
     [ noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar x)
             , (TensorVar y, TensorVar y)
             , (TensorVar s0, TensorVar ta)
@@ -99,14 +132,14 @@ runRewriteTests = do
     "multiple transpose-transpose matches"
     ( sort
         [ noLits
-            ( mustBimap
+            ( Map.fromList
                 [ (TensorVar x, TensorVar (Tensor "inp1"))
                 , (TensorVar s0, TensorVar ta)
                 , (TensorVar s1, TensorVar tb)
                 ]
             )
         , noLits
-            ( mustBimap
+            ( Map.fromList
                 [ (TensorVar x, TensorVar (Tensor "inp2"))
                 , (TensorVar s0, TensorVar tc)
                 , (TensorVar s1, TensorVar td)
@@ -130,7 +163,7 @@ runRewriteTests = do
   assertEq
     "conv2d relu"
     [ noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -154,7 +187,7 @@ runRewriteTests = do
   assertEq
     "conv2d relu: var-to-lit match"
     [ Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -171,7 +204,7 @@ runRewriteTests = do
 
   let target6 = mustGraph [Asst (ta, Conv2D litK litS litP (ActiModeTermLit ActRelu) inp wt), Asst (tb, Relu ta)]
   let match6 = Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -215,7 +248,7 @@ runRewriteTests = do
   assertEq
     "concat-split0: axis var-to-lit"
     [ Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -258,7 +291,7 @@ runRewriteTests = do
   assertEq
     "mul-mul: scalar var-to-lit"
     [ Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar tb)
@@ -281,7 +314,7 @@ runRewriteTests = do
 
   let target7 = mustGraph [Asst (ta, Mul inp litSc3), Asst (tb, Mul ta litSc5)]
   let match7 = Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar tb)
@@ -300,7 +333,7 @@ runRewriteTests = do
   assertEq
     "conv2d: mixed var-to-var and var-to-lit"
     [ Match
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -324,7 +357,7 @@ runRewriteTests = do
   -- Shared internal
   let sharedTarget = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu ta)]
       sharedMatch = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar tb)
@@ -341,7 +374,7 @@ runRewriteTests = do
 
   let target1 = mustGraph [Asst (ta, Transpose inp), Asst (tb, Transpose ta), Asst (tc, Relu tb)]
   let match1 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar tb)
@@ -358,7 +391,7 @@ runRewriteTests = do
 
   let target2 = mustGraph [Asst (ta, EwAdd x y)]
   let match2 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar x)
             , (TensorVar y, TensorVar y)
             , (TensorVar s0, TensorVar ta)
@@ -375,7 +408,7 @@ runRewriteTests = do
 
   let target3 = mustGraph [Asst (ta, Conv2D myK myS myP (ActiModeTermLit ActRelu) inp wt), Asst (tb, Relu ta)]
   let match3 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -406,7 +439,7 @@ runRewriteTests = do
         , Asst (te, Sigmoid td)
         ]
   let match4 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar ta)
             , (TensorVar s0, TensorVar tb)
             , (TensorVar s1, TensorVar tc)
@@ -433,7 +466,7 @@ runRewriteTests = do
         , Asst (td, Relu tc)
         ]
   let match5 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -469,7 +502,7 @@ runRewriteTests = do
         , Asst (tc, Transpose tb)
         ]
   let chain1Match1 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar ta)
             , (TensorVar y, TensorVar (Tensor "inp2"))
             , (TensorVar s0, TensorVar tb)
@@ -492,7 +525,7 @@ runRewriteTests = do
     (apply chain1Start axiom10 chain1Match1)
   let chain1After1 = chain1Expected1
   let chain1Match2 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar s0, TensorVar ta)
             , (TensorVar s1, TensorVar (Tensor "r0"))
@@ -517,7 +550,7 @@ runRewriteTests = do
         , Asst (tc, Relu tb)
         ]
   let chain2Match1 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar inp)
             , (TensorVar y, TensorVar wt)
             , (TensorVar s0, TensorVar ta)
@@ -542,7 +575,7 @@ runRewriteTests = do
     (apply chain2Start axiom22 chain2Match1)
   let chain2After1 = chain2Expected1
   let chain2Match2 = noLits
-        ( mustBimap
+        ( Map.fromList
             [ (TensorVar x, TensorVar ta)
             , (TensorVar s0, TensorVar tb)
             , (TensorVar s1, TensorVar tc)
