@@ -58,3 +58,33 @@ so:
 First graph has 2 nodes: s0 = transpose(x) and s1 = transpose(s0)
 Second graph is empty (since we are not binding any new variables)
 Then the maps are: x -> x and s1 -> x (note that in this second graph, x is both input and output)
+
+
+TODO:
+
+change so that IR:
+- has a 0 input operator which instantiates an input tensor
+- 
+
+## Week 8 Work Logs.
+
+Weird substitution:
+
+(substitution 
+    (graph 
+        (asst (tensor s0) (const-iconv (kernel2d k)))) 
+        (asst (tensor out) (pool2d-avg (kernel2d k) (stride2d 1 1) same (tensor s0))) 
+    (graph 
+        (asst (tensor out) (const-pool (kernel2d k)))
+    ) 
+    (bimap) 
+    (bimap ((tensor out) (tensor out)))
+)
+
+note that this substitution operates entirely on the constants (so like not tensors, meaning that as you can see from `(bimap)` it does not take any inputs). Also this substitution is the only one that was NOT present in the original paper, so we can discard it?
+
+THere is this weird asymmetry between:
+- All the exprs are tensors, but
+- When matching, we have to map each variable to each other variable.
+
+So like why say for something like Scalar, don't we also need to store the entire expression and instead just have it as a (possibly nested) arguent to one of the tensor exprs? Because there is never a case in which a scalar that is not a var is shared by 2 expressions, so we dont really need to store it as a DAG: storing it as a tree suffices.

@@ -1,17 +1,14 @@
 {-# LANGUAGE FlexibleInstances #-}
 
-module Deserialize
-  ( SExprDeserialize(..)
-  , fromSExprString
-  , parseSExpr
-  , load
-  ) where
+module Deserialize where
 
 import Control.Applicative ((<|>))
 import qualified Data.Bimap as BM
 import Data.Char (isSpace)
+import qualified Data.Set as Set
 import IR.IR
 import Serialize (SExpr(..))
+import Substitutions.Substitution (Substitution(..), mkBimap, mkSubstitution)
 import Text.Read (readMaybe)
 
 class SExprDeserialize a where
@@ -93,8 +90,6 @@ instance SExprDeserialize PadMode where
 instance SExprDeserialize ActiMode where
   fromSExpr (SAtom "none") = Just ActNone
   fromSExpr (SAtom "relu") = Just ActRelu
-  fromSExpr (SAtom "sigmoid") = Just ActSigmoid
-  fromSExpr (SAtom "tanh") = Just ActTanh
   fromSExpr _ = Nothing
 
 instance SExprDeserialize ScalarLiteral where
@@ -136,18 +131,18 @@ instance SExprDeserialize ScalarTerm where
 instance SExprDeserialize Expr where
   fromSExpr = parseExpr
 
-instance SExprDeserialize Asst where
+instance SExprDeserialize (Tensor, Expr) where
   fromSExpr (SList [SAtom "asst", tExpr, eExpr]) =
-    Asst <$> ((,) <$> fromSExpr tExpr <*> fromSExpr eExpr)
+    (,) <$> fromSExpr tExpr <*> fromSExpr eExpr
   fromSExpr _ = Nothing
 
 instance SExprDeserialize Graph where
   fromSExpr (SList (SAtom "graph" : asstExprs)) = do
-    assts <- mapM fromSExpr asstExprs
-    mkGraph assts
+    bindings <- mapM fromSExpr asstExprs
+    mkGraph (addInferredInputs bindings)
   fromSExpr _ = Nothing
 
-instance SExprDeserialize (BM.Bimap Var Var) where
+instance SExprDeserialize (BM.Bimap Tensor Tensor) where
   fromSExpr (SList (SAtom "bimap" : pairExprs)) = do
     pairs <- mapM parsePair pairExprs
     mkBimap pairs
@@ -156,12 +151,45 @@ instance SExprDeserialize (BM.Bimap Var Var) where
       parsePair _ = Nothing
   fromSExpr _ = Nothing
 
-instance SExprDeserialize Rewrite where
+instance SExprDeserialize Substitution where
+  fromSExpr (SList [SAtom "substitution", srcExpr, dstExpr, inExpr, outExpr]) =
+    parseSubstitution srcExpr dstExpr inExpr outExpr
   fromSExpr (SList [SAtom "rewrite", srcExpr, dstExpr, inExpr, outExpr]) =
-    Rewrite <$> fromSExpr srcExpr <*> fromSExpr dstExpr <*> fromSExpr inExpr <*> fromSExpr outExpr
+    parseSubstitution srcExpr dstExpr inExpr outExpr
   fromSExpr _ = Nothing
 
+parseSubstitution :: SExpr -> SExpr -> SExpr -> SExpr -> Maybe Substitution
+parseSubstitution srcExpr dstExpr inExpr outExpr = do
+  srcGraph0 <- fromSExpr srcExpr
+  dstGraph0 <- fromSExpr dstExpr
+  inMap <- fromSExpr inExpr
+  outMap <- fromSExpr outExpr
+  let srcInputs = Set.fromList [t | (t, _) <- BM.toList inMap]
+      dstInputs = Set.fromList [t | (_, t) <- BM.toList inMap]
+      srcBindings = ensureInputBindings srcInputs (graphBindings srcGraph0)
+      dstBindings = ensureInputBindings dstInputs (graphBindings dstGraph0)
+  mkSubstitution srcBindings dstBindings (BM.toList inMap) (BM.toList outMap)
+
+addInferredInputs :: [(Tensor, Expr)] -> [(Tensor, Expr)]
+addInferredInputs bindings = ensureInputBindings inferredInputs bindings
+  where
+    inferredInputs =
+      Set.unions [tensorsInExpr expr | (_, expr) <- bindings]
+        Set.\\ Set.fromList [t | (t, _) <- bindings]
+
+ensureInputBindings :: Set.Set Tensor -> [(Tensor, Expr)] -> [(Tensor, Expr)]
+ensureInputBindings requiredInputs bindings =
+  missingInputs ++ bindings
+  where
+    defined = Set.fromList [t | (t, _) <- bindings]
+    missingInputs =
+      [ (t, Input)
+      | t <- Set.toAscList requiredInputs
+      , Set.notMember t defined
+      ]
+
 parseExpr :: SExpr -> Maybe Expr
+parseExpr (SList [SAtom "input"]) = Just Input
 parseExpr (SList [SAtom "conv2d", k, s, p, a, x, y]) =
   Conv2D <$> fromSExpr k <*> fromSExpr s <*> fromSExpr p <*> fromSExpr a <*> fromSExpr x <*> fromSExpr y
 parseExpr (SList [SAtom "pool2d-avg", k, s, p, x]) =
@@ -169,8 +197,6 @@ parseExpr (SList [SAtom "pool2d-avg", k, s, p, x]) =
 parseExpr (SList [SAtom "pool2d-max", k, s, p, x]) =
   Pool2DMax <$> fromSExpr k <*> fromSExpr s <*> fromSExpr p <*> fromSExpr x
 parseExpr (SList [SAtom "relu", x]) = Relu <$> fromSExpr x
-parseExpr (SList [SAtom "sigmoid", x]) = Sigmoid <$> fromSExpr x
-parseExpr (SList [SAtom "tanh", x]) = Tanh <$> fromSExpr x
 parseExpr (SList [SAtom "matmul", x, y]) = MatMul <$> fromSExpr x <*> fromSExpr y
 parseExpr (SList [SAtom "ewadd", x, y]) = EwAdd <$> fromSExpr x <*> fromSExpr y
 parseExpr (SList [SAtom "ewmul", x, y]) = EwMul <$> fromSExpr x <*> fromSExpr y

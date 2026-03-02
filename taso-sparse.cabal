@@ -18,13 +18,12 @@ common warnings
 library
     import:           warnings
     exposed-modules:
-        Augment
         Axioms
         Deserialize
         IR.IR
-        IR.Utils
-        Rewrite
-        Search
+        Short
+        TASO
+        Substitutions.Substitution
         Serialize
     -- other-modules:
     -- other-extensions:
@@ -32,7 +31,7 @@ library
         base ^>=4.18.3.0,
         bimap ^>=0.5.0,
         containers ^>=0.6.7
-    hs-source-dirs:   src
+    hs-source-dirs:   src src/IR
     default-language: Haskell2010
 
 executable taso-sparse
@@ -52,19 +51,27 @@ executable taso-sparse
 test-suite taso-sparse-test
     import:           warnings
     default-language: Haskell2010
+    build-tool-depends:
+        hspec-discover:hspec-discover
     other-modules:
-        DeserializeTests
-        RewriteTests
-        RoundTripTests
-        SearchTests
-        SerializeTests
-        TestUtils
+        -- EventuallyDelete.RewriteSpec
+        -- EventuallyDelete.SearchSpec
+        -- EventuallyDelete.SubstitutionSpec
+        IR.CodecSpec
+        IR.DeserializeSpec
+        IR.IRSpec
+        IR.SerializeSpec
+        SearchSpec
+        Substitutions.ApplySpec
+        Substitutions.MatchSpec
+        Substitutions.SubstitutionSpec
     -- other-extensions:
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
-    main-is:          Main.hs
+    main-is:          Spec.hs
     build-depends:
         base ^>=4.18.3.0,
         bimap ^>=0.5.0,
         containers ^>=0.6.7,
+        hspec ^>=2.11,
         taso-sparse

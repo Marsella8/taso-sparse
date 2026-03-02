@@ -1,20 +1,15 @@
 {-# LANGUAGE FlexibleInstances #-}
 
-module Serialize
-  ( SExpr(..)
-  , SExprSerialize(..)
-  , renderSExpr
-  , toSExprString
-  , write
-  ) where
+module Serialize where
 
 import qualified Data.Bimap as BM
 import IR.IR
+import Substitutions.Substitution (Substitution(..))
 
 data SExpr
   = SAtom String
   | SList [SExpr]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Read)
 
 class SExprSerialize a where
   toSExpr :: a -> SExpr
@@ -92,8 +87,6 @@ instance SExprSerialize PadMode where
 instance SExprSerialize ActiMode where
   toSExpr ActNone = atom "none"
   toSExpr ActRelu = atom "relu"
-  toSExpr ActSigmoid = atom "sigmoid"
-  toSExpr ActTanh = atom "tanh"
 
 instance SExprSerialize ScalarLiteral where
   toSExpr (ScalarLiteral n) = atom (show n)
@@ -124,12 +117,11 @@ instance SExprSerialize ScalarTerm where
   toSExpr (ScalarMul a b) = list [atom "scalar-mul", toSExpr a, toSExpr b]
 
 instance SExprSerialize Expr where
+  toSExpr Input = list [atom "input"]
   toSExpr (Conv2D k s p a x y) = list [atom "conv2d", toSExpr k, toSExpr s, toSExpr p, toSExpr a, toSExpr x, toSExpr y]
   toSExpr (Pool2DAvg k s p x) = list [atom "pool2d-avg", toSExpr k, toSExpr s, toSExpr p, toSExpr x]
   toSExpr (Pool2DMax k s p x) = list [atom "pool2d-max", toSExpr k, toSExpr s, toSExpr p, toSExpr x]
   toSExpr (Relu x) = list [atom "relu", toSExpr x]
-  toSExpr (Sigmoid x) = list [atom "sigmoid", toSExpr x]
-  toSExpr (Tanh x) = list [atom "tanh", toSExpr x]
   toSExpr (MatMul x y) = list [atom "matmul", toSExpr x, toSExpr y]
   toSExpr (EwAdd x y) = list [atom "ewadd", toSExpr x, toSExpr y]
   toSExpr (EwMul x y) = list [atom "ewmul", toSExpr x, toSExpr y]
@@ -144,20 +136,20 @@ instance SExprSerialize Expr where
   toSExpr ConstImm = list [atom "const-imm"]
   toSExpr ConstOne = list [atom "const-one"]
 
-instance SExprSerialize Asst where
-  toSExpr (Asst (t0, e0)) = list [atom "asst", toSExpr t0, toSExpr e0]
+instance SExprSerialize (Tensor, Expr) where
+  toSExpr (t0, e0) = list [atom "asst", toSExpr t0, toSExpr e0]
 
 instance SExprSerialize Graph where
-  toSExpr (Graph assts) = list (atom "graph" : map toSExpr assts)
+  toSExpr g = list (atom "graph" : map toSExpr (graphBindings g))
 
-instance SExprSerialize (BM.Bimap Var Var) where
+instance SExprSerialize (BM.Bimap Tensor Tensor) where
   toSExpr bm =
     list (atom "bimap" : map pairExpr (BM.toList bm))
     where
       pairExpr (k, v) = list [toSExpr k, toSExpr v]
 
-instance SExprSerialize Rewrite where
-  toSExpr (Rewrite srcGraph dstGraph input output) = list [atom "rewrite", toSExpr srcGraph, toSExpr dstGraph, toSExpr input, toSExpr output]
+instance SExprSerialize Substitution where
+  toSExpr (Substitution srcGraph dstGraph input output) = list [atom "substitution", toSExpr srcGraph, toSExpr dstGraph, toSExpr input, toSExpr output]
 
 write :: SExprSerialize a => FilePath -> [a] -> IO ()
 write path values = do

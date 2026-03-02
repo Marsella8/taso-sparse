@@ -26,23 +26,23 @@
 - IR (symbolic, no shapes/cost): SSA-style term graph:
   - `Graph` is a set of bindings `t = Expr(t1, …)` (DAG; supports sharing; multiple outputs).
   - outputs are tensors not used by any other expression.
-- Rewrite representation:
+- Substitution representation:
   - `(srcGraph, dstGraph, inputMap, outputMap)` with explicit I/O tensor correspondence.
 - Params are terms (var or literal): kernel/stride/pad/activation/axis/scalars.
 - Matching enumerates all consistent unifiers:
-  - `match :: Graph -> Rewrite -> [Match]`
+  - `match :: Graph -> Substitution -> [Match]`
 
 
 ---
 
 ## Apply, bounded search
 - Applying a rewrite:
-  - `apply :: Graph -> Rewrite -> Match -> Graph`
+  - `apply :: Graph -> Substitution -> Match -> Graph`
   - remove matched tensors, but keep shared internal nodes still referenced outside.
   - add `dst` bindings; rename internal `dst` tensors with fresh names (`r0`, `r1`, …).
   - redirect outputs according to `outputMap`.
 - Proof search:
-  - `bfs :: [Rewrite] -> Graph -> Graph -> Int -> Maybe Derivation`
+  - `bfs :: [Substitution] -> Graph -> Graph -> Int -> Maybe Derivation`
 
 
 ---

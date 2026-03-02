@@ -1,20 +1,11 @@
-module Rewrite
-  ( Match(..)
-  , LitVal(..)
-  , match
-  , apply
-  , Derivation
-  , Lookup
-  , MatchState
-  , matchFrom
-  , redirectExpr
-  ) where
+module Substitution where
 
 import qualified Data.Bimap as Bi
 import qualified Data.Map.Strict as Map
 import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import IR.IR
+import Substitutions.Substitution (Substitution(..))
 
 data LitVal
   = LitKernel2D Kernel2DLiteral
@@ -23,23 +14,23 @@ data LitVal
   | LitActiMode ActiMode
   | LitAxis AxisLiteral
   | LitScalar ScalarTerm
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
 
 data Match = Match
   { matchMap  :: Map.Map Var Var
   , matchLits :: Map.Map Var LitVal
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
 
-type Derivation = [(Rewrite, Match)]
+type Derivation = [(Substitution, Match)]
 
 type Lookup = Map.Map Tensor Expr
 
 type MatchState = (Map.Map Var Var, Map.Map Var LitVal)
 
-match :: Graph -> Rewrite -> [Match]
+match :: Graph -> Substitution -> [Match]
 match target rule =
-  let srcGraph = src rule
+  let srcGraph = subSrc rule
       patLookup = Map.fromList (graphBindings srcGraph)
       tgtLookup = Map.fromList (graphBindings target)
       patOutputs = Set.toList (graphOutputVars srcGraph)
@@ -51,7 +42,8 @@ match target rule =
      ]
 
 matchFrom :: Lookup -> Lookup -> MatchState -> Tensor -> Tensor -> [MatchState]
-matchFrom patLookup tgtLookup ms@(vm, _) patT tgtT =
+matchFrom patLookup tgtLookup ms patT tgtT =
+  let (vm, _) = ms in 
   case bindVar vm (TensorVar patT) (TensorVar tgtT) of
     Nothing -> []
     Just vm' ->
@@ -64,6 +56,7 @@ matchFrom patLookup tgtLookup ms@(vm, _) patT tgtT =
 matchExpr :: Lookup -> Lookup -> MatchState -> Expr -> Expr -> [MatchState]
 matchExpr patLookup tgtLookup ms patExpr tgtExpr =
   case (patExpr, tgtExpr) of
+    (Input, Input) -> [ms]
     (Conv2D pk ps pp pc px py, Conv2D tk ts tp tc tx ty) ->
       matchConvParams pk ps pp pc tk ts tp tc ms >>= \ms1 ->
       matchFrom patLookup tgtLookup ms1 px tx >>= \ms2 ->
@@ -75,8 +68,6 @@ matchExpr patLookup tgtLookup ms patExpr tgtExpr =
       matchPoolParams pk ps pp tk ts tp ms >>= \ms1 ->
       matchFrom patLookup tgtLookup ms1 px tx
     (Relu px, Relu tx) -> matchFrom patLookup tgtLookup ms px tx
-    (Sigmoid px, Sigmoid tx) -> matchFrom patLookup tgtLookup ms px tx
-    (Tanh px, Tanh tx) -> matchFrom patLookup tgtLookup ms px tx
     (MatMul px py, MatMul tx ty) ->
       matchFrom patLookup tgtLookup ms px tx >>= \ms1 ->
       matchFrom patLookup tgtLookup ms1 py ty
@@ -202,13 +193,13 @@ bindLit (vm, lm) pv lv =
       | Map.member pv vm -> Nothing
       | otherwise -> Just (vm, Map.insert pv lv lm)
 
-apply :: Graph -> Rewrite -> Match -> Graph
+apply :: Graph -> Substitution -> Match -> Graph
 apply target rule (Match vm lm) =
   mustGraph (keptAssts ++ newAssts)
   where
-    srcBound = Set.fromList [t | (t, _) <- graphBindings (src rule)]
-    dstBound = Set.fromList [t | (t, _) <- graphBindings (dst rule)]
-    srcOutputs = graphOutputVars (src rule)
+    srcBound = Set.fromList [t | (t, _) <- graphBindings (subSrc rule)]
+    dstBound = Set.fromList [t | (t, _) <- graphBindings (subDst rule)]
+    srcOutputs = graphOutputVars (subSrc rule)
     srcInternals = srcBound Set.\\ srcOutputs
 
     matchedTensors = Set.fromList
@@ -238,23 +229,25 @@ apply target rule (Match vm lm) =
 
     inputRenames =
       [ (dstV, tgtV)
-      | (srcV, dstV) <- Bi.toList (inputMap rule)
+      | (srcV, dstV) <- Bi.toList (subInputMap rule)
       , Just tgtV <- [Map.lookup srcV vm]
       ]
 
     outputRenames =
       [ (dstV, tgtV)
-      | (srcV, dstV) <- Bi.toList (outputMap rule)
-      , case dstV of { TensorVar t -> Set.member t dstBound; _ -> False }
+      | (srcV, dstV) <- Bi.toList (subOutputMap rule)
+      , case dstV of
+          TensorVar t -> Set.member t dstBound
+          _ -> False
       , Just tgtV <- [Map.lookup srcV vm]
       ]
 
     dstOutputTensors = Set.fromList
-      [ t | (_, TensorVar t) <- Bi.toList (outputMap rule) ]
+      [ t | (_, TensorVar t) <- Bi.toList (subOutputMap rule) ]
     internalDstTensors = Set.toList (dstBound Set.\\ dstOutputTensors)
 
     usedNames = Set.fromList $
-      concatMap (\(t, e) -> tensorName t : map tensorName (Set.toList (exprTensorVars e)))
+      concatMap (\(t, e) -> tensorNameOf t : map tensorNameOf (Set.toList (exprTensorVars e)))
         (graphBindings target)
     freshNames =
       [ Tensor name
@@ -271,7 +264,7 @@ apply target rule (Match vm lm) =
 
     redirectMap = Map.fromList
       [ (tgtT, renamedT)
-      | (srcV, dstV) <- Bi.toList (outputMap rule)
+      | (srcV, dstV) <- Bi.toList (subOutputMap rule)
       , let renamedV = Map.findWithDefault dstV dstV renameMap
       , Just (TensorVar tgtT) <- [Map.lookup srcV vm]
       , TensorVar renamedT <- [renamedV]
@@ -279,12 +272,12 @@ apply target rule (Match vm lm) =
       ]
 
     newAssts =
-      [ Asst (renameTensor renameMap t, renameExpr renameMap lm e)
-      | (t, e) <- graphBindings (dst rule)
+      [ (renameTensor renameMap t, renameExpr renameMap lm e)
+      | (t, e) <- graphBindings (subDst rule)
       ]
 
     keptAssts =
-      [ Asst (t, redirectExpr redirectMap e)
+      [ (t, redirectExpr redirectMap e)
       | (t, e) <- graphBindings target
       , not (Set.member t toRemove)
       ]
@@ -294,6 +287,9 @@ renameTensor rm t =
   case Map.lookup (TensorVar t) rm of
     Just (TensorVar t') -> t'
     _ -> t
+
+tensorNameOf :: Tensor -> String
+tensorNameOf (Tensor name) = name
 
 renameKernel2D :: Map.Map Var Var -> Map.Map Var LitVal -> Kernel2DTerm -> Kernel2DTerm
 renameKernel2D rm lm (Kernel2DTermVar v) =
@@ -354,6 +350,7 @@ renameScalar _ _ lit = lit
 renameExpr :: Map.Map Var Var -> Map.Map Var LitVal -> Expr -> Expr
 renameExpr rm lm expr =
   case expr of
+    Input -> Input
     Conv2D ek es ep ec ex ey ->
       Conv2D (renameKernel2D rm lm ek) (renameStride2D rm lm es) (renamePadMode rm lm ep)
         (renameActiMode rm lm ec) (rt ex) (rt ey)
@@ -362,8 +359,6 @@ renameExpr rm lm expr =
     Pool2DMax ek es ep ex ->
       Pool2DMax (renameKernel2D rm lm ek) (renameStride2D rm lm es) (renamePadMode rm lm ep) (rt ex)
     Relu ex -> Relu (rt ex)
-    Sigmoid ex -> Sigmoid (rt ex)
-    Tanh ex -> Tanh (rt ex)
     MatMul ex ey -> MatMul (rt ex) (rt ey)
     EwAdd ex ey -> EwAdd (rt ex) (rt ey)
     EwMul ex ey -> EwMul (rt ex) (rt ey)
@@ -383,12 +378,11 @@ renameExpr rm lm expr =
 redirectExpr :: Map.Map Tensor Tensor -> Expr -> Expr
 redirectExpr rm expr =
   case expr of
+    Input -> expr
     Conv2D ek es ep ec ex ey -> Conv2D ek es ep ec (rt ex) (rt ey)
     Pool2DAvg ek es ep ex -> Pool2DAvg ek es ep (rt ex)
     Pool2DMax ek es ep ex -> Pool2DMax ek es ep (rt ex)
     Relu ex -> Relu (rt ex)
-    Sigmoid ex -> Sigmoid (rt ex)
-    Tanh ex -> Tanh (rt ex)
     MatMul ex ey -> MatMul (rt ex) (rt ey)
     EwAdd ex ey -> EwAdd (rt ex) (rt ey)
     EwMul ex ey -> EwMul (rt ex) (rt ey)

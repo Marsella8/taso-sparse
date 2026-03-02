@@ -8,7 +8,7 @@ import modal
 
 APP_NAME = "taso-generate-substitution-sexpr"
 TASO_REPO = "https://github.com/jiazhihao/TASO.git"
-RULES_OUTPUT_PATH = Path("data/substitution_rules.txt")
+RULES_OUTPUT_PATH = Path("taso/substitutions/substitution_rules.txt")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")

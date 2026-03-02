@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-RULES_PATH = Path("data/substitution_rules.txt")
-OUTPUT_PATH = Path("data/substitutions.sexp")
+RULES_PATH = Path("taso/substitutions/substitution_rules.txt")
+OUTPUT_PATH = Path("taso/substitutions/substitutions.sexp")
 
 PM_KERNEL_H = 4
 PM_KERNEL_W = 5

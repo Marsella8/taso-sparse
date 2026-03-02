@@ -1,4 +1,4 @@
-#!/usr/bin/env -S runghc -isrc
+#!/usr/bin/env -S runghc -isrc -isrc/IR
 
 import Axioms (axioms)
 import Serialize (toSExprString, write)
