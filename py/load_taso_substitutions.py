@@ -293,15 +293,11 @@ def _rule_to_rewrite(rule: Rule) -> str:
 
     shared = _free_inputs(rule.srcOp) & _free_inputs(rule.dstOp)
     tensor_ids = sorted([x for x in shared if x not in SCALAR_INPUT_OP_IDS], key=lambda x: -x)
-    scalar_ids = sorted([x for x in shared if x in SCALAR_INPUT_OP_IDS], key=lambda x: -x)
 
     input_pairs: list[str] = []
     for op_id in tensor_ids:
         n = f"t{-op_id}"
         input_pairs.append(f"((tensor {n}) (tensor {n}))")
-    for op_id in scalar_ids:
-        n = f"s{-op_id}"
-        input_pairs.append(f"((scalar {n}) (scalar {n}))")
     input_bimap = "(bimap " + " ".join(input_pairs) + ")"
 
     output_pairs: list[str] = []
@@ -311,7 +307,7 @@ def _rule_to_rewrite(rule: Rule) -> str:
         output_pairs.append(f"((tensor {src_name}) (tensor {dst_name}))")
     output_bimap = "(bimap " + " ".join(output_pairs) + ")"
 
-    return f"(rewrite {src_graph} {dst_graph} {input_bimap} {output_bimap})"
+    return f"(substitution {src_graph} {dst_graph} {input_bimap} {output_bimap})"
 
 
 # --- val ---
@@ -363,7 +359,7 @@ def _check_rule(idx: int, rule: Rule) -> None:
 
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[1]
     text = (repo_root / RULES_PATH).read_text(encoding="utf-8")
     rules = _parse_rules(text)
 

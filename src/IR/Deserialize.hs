@@ -154,8 +154,6 @@ instance SExprDeserialize (BM.Bimap Tensor Tensor) where
 instance SExprDeserialize Substitution where
   fromSExpr (SList [SAtom "substitution", srcExpr, dstExpr, inExpr, outExpr]) =
     parseSubstitution srcExpr dstExpr inExpr outExpr
-  fromSExpr (SList [SAtom "rewrite", srcExpr, dstExpr, inExpr, outExpr]) =
-    parseSubstitution srcExpr dstExpr inExpr outExpr
   fromSExpr _ = Nothing
 
 parseSubstitution :: SExpr -> SExpr -> SExpr -> SExpr -> Maybe Substitution

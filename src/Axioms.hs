@@ -4,8 +4,8 @@ import IR.IR
 import Short
 import Substitutions.Substitution
 
-fwdAxioms :: [Axiom]
-fwdAxioms =
+fwdAxiomsBase :: [Axiom]
+fwdAxiomsBase =
   [ axiom1
   , axiom2
   , axiom3
@@ -49,8 +49,10 @@ fwdAxioms =
   , axiom41
   , axiom42
   , axiom43
-  , axiom44
   ]
+
+fwdAxioms :: [Axiom]
+fwdAxioms = fwdAxiomsBase ++ [axiom44]
 
 bwdAxioms :: [Axiom]
 bwdAxioms = map invertAxiom fwdAxioms
