@@ -1,6 +1,7 @@
 module IR.DeserializeSpec where
 
 import Deserialize (fromSExprString)
+import IR.Graph
 import IR.IR
 import Short
 import Substitutions.Substitution (Bimap, Substitution(..), mustBimap)

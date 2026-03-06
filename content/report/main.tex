@@ -25,7 +25,7 @@
 TODO: Add abstract (about 100--150 words).
 \end{abstract}
 
-\keywords{graph rewriting, deep learning compilers, TASO, substitution systems}
+% \keywords{graph rewriting, deep learning compilers, TASO, substitution systems}
 
 \maketitle
 
@@ -43,7 +43,20 @@ TODO
 TODO (e.g., TASO~\cite{jia2019taso})
 
 \section{Approach and Implementation}
-TODO
+\subsection{IR}
+\subsection{Axioms}
+The axioms are strucutred this and that way.
+EXAMPLE WITH PICTURE
+\subsection{Substitution Engine}
+The matching is done by initially matching the ouput tensor of the source of the axiom graph with a tensor of the output graph.
+We then recursively match accoring to the following rules. For a given pair of nodes:
+- If both are input...
+- If src input and dst not input...
+- If src not input and dst input...
+- If neither is input, then they must be the same expression: we then recurively match on their subexpressions.
+(We propagate a partial state as we go along).
+
+\subsection{Proof Search}
 
 \section{Methodology and Results}
 TODO

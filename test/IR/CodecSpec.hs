@@ -2,6 +2,7 @@ module IR.CodecSpec where
 
 import Axioms (axioms)
 import Deserialize (fromSExprString)
+import IR.Graph
 import IR.IR
 import Serialize (SExprSerialize(..), renderSExpr)
 import Short

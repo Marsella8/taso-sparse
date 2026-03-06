@@ -6,6 +6,7 @@ import Control.Applicative ((<|>))
 import qualified Data.Bimap as BM
 import Data.Char (isSpace)
 import qualified Data.Set as Set
+import IR.Graph
 import IR.IR
 import Serialize (SExpr(..))
 import Substitutions.Substitution (Substitution(..), mkBimap, mkSubstitution)

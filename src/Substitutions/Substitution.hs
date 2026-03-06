@@ -3,6 +3,7 @@ module Substitutions.Substitution where
 import Control.Monad (guard)
 import qualified Data.Bimap as Bi
 import qualified Data.Set as Set
+import IR.Graph
 import IR.IR
 import Data.Maybe (fromMaybe)
 
@@ -71,7 +72,7 @@ invertSubstitution (Substitution srcGraph dstGraph inMap outMap) =
   Substitution dstGraph srcGraph (Bi.twist inMap) (Bi.twist outMap)
 
 mkAxiom :: [(Tensor, Expr)] -> [(Tensor, Expr)] -> (Tensor, Tensor) -> Maybe Axiom
-mkAxiom srcBindings dstBindings (dstOut, srcOut) = do
+mkAxiom srcBindings dstBindings (srcOut, dstOut) = do
   srcGraph <- mkGraph srcBindings
   dstGraph <- mkGraph dstBindings
   let srcInputs = graphInputs srcGraph

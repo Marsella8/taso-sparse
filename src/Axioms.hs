@@ -1,5 +1,6 @@
 module Axioms where
 
+import IR.Graph
 import IR.IR
 import Short
 import Substitutions.Substitution
@@ -185,7 +186,7 @@ axiom9 =
     ]
     [ (x, inp)
     ]
-    (x, out)
+    (out, x)
 
 axiom10 :: Axiom
 axiom10 =
@@ -426,7 +427,7 @@ axiom25 =
     ]
     [ (x, inp)
     ]
-    (x, out)
+    (out, x)
 
 axiom26 :: Axiom
 axiom26 =
@@ -437,7 +438,7 @@ axiom26 =
     ]
     [ (x, inp)
     ]
-    (x, out)
+    (out, x)
 
 axiom27 :: Axiom
 axiom27 =
@@ -448,7 +449,7 @@ axiom27 =
     ]
     [ (x, inp)
     ]
-    (x, out)
+    (out, x)
 
 axiom28 :: Axiom
 axiom28 =

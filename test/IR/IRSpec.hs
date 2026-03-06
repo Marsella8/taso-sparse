@@ -1,6 +1,7 @@
 module IR.IRSpec where
 
 import qualified Data.Set as Set
+import IR.Graph
 import IR.IR
 import Short
 import Test.Hspec (Spec, it, shouldBe)

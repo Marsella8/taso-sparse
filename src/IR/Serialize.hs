@@ -3,6 +3,7 @@
 module Serialize where
 
 import qualified Data.Bimap as BM
+import IR.Graph
 import IR.IR
 import Substitutions.Substitution (Substitution(..))
 

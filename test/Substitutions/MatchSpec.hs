@@ -2,6 +2,7 @@ module Substitutions.MatchSpec where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import IR.Graph
 import IR.IR
 import Short
 import Substitutions.Match (Match(..), TargetMatch(..), matchIsComplete, matchRootedSubgraphToGraph)

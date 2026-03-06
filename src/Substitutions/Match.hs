@@ -3,6 +3,7 @@ module Substitutions.Match where
 import Data.Maybe (mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import IR.Graph
 import IR.IR
 import Substitutions.Substitution (Axiom(..))
 

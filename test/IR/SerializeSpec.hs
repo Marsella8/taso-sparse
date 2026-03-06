@@ -1,6 +1,7 @@
 module IR.SerializeSpec where
 
 import Axioms (axioms)
+import IR.Graph
 import IR.IR
 import Serialize (SExprSerialize(..), renderSExpr)
 import Short
