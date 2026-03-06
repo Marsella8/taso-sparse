@@ -14,8 +14,8 @@ spec = do
   codecExprRoundTripSpec
   codecAxiomRoundTripSpec
   codecSubstitutionSmokeSpec
-  -- codecTasoSubstitutionRoundTripSpec
-  -- codecFileLoadSmokeSpec
+  codecTasoSubstitutionRoundTripSpec
+  codecFileLoadSmokeSpec
 
 mkCodecExprSpec :: (String, Expr) -> Spec
 mkCodecExprSpec (label, expr) =

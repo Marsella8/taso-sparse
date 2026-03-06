@@ -100,9 +100,11 @@ consider:
 (1) Given a graph G and a move sequence r = (r_1, ..., r_n) in S,
     there exists a move sequence r' = (r_1', ..., r_m') in S' such that
     r(G) = r'(G).
+
 (2) Given a move sequence r = (r_1, ..., r_n) in S, there exists a move
     sequence r' = (r_1', ..., r_m') in S' such that for any graph G,
     r(G) = r'(G).
+
 (3) Assuming that the move set of S can be encoded in a set of graph
     substitutions D, and that the move set of S' can be encoded in a
     different set of graph substitutions D', then given a graph
