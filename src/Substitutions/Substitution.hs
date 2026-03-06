@@ -4,6 +4,7 @@ import Control.Monad (guard)
 import qualified Data.Bimap as Bi
 import qualified Data.Set as Set
 import IR.IR
+import Data.Maybe (fromMaybe)
 
 type Bimap = Bi.Bimap Tensor Tensor
 
@@ -25,7 +26,7 @@ data Axiom = Axiom
   deriving (Eq, Ord)
 
 require :: String -> Maybe a -> a
-require msg = maybe (error msg) id
+require msg = fromMaybe (error msg)
 
 bimapSrc :: Bimap -> Set.Set Tensor
 bimapSrc = Set.fromList . map fst . Bi.toList

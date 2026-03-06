@@ -4,6 +4,7 @@ import Control.Monad (guard)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Maybe (fromJust)
 
 data Sort
   = TensorSort
@@ -220,6 +221,64 @@ graphOutputs g =
   graphTensorVars g Set.\\ usedTensors
   where
     usedTensors = Set.unions (Set.map tensorsInExpr (graphExprs g))
+
+graphInternals :: Graph -> Set Tensor
+graphInternals g =
+  graphTensorVars g Set.\\ (graphInputs g `Set.union` graphOutputs g)
+
+graphMustLookup :: Graph -> Tensor -> Expr
+graphMustLookup (Graph m) t = fromJust (Map.lookup t m)
+
+varsInGraph :: Graph -> Set Var
+varsInGraph g =
+  Set.map TensorVar (graphTensorVars g) `Set.union`
+  Set.unions (Set.map varsInExpr (graphExprs g))
+
+varsInExpr :: Expr -> Set Var
+varsInExpr Input = Set.empty
+varsInExpr (Conv2D k s p a x y) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p, varsInActiModeTerm a, Set.fromList [TensorVar x, TensorVar y]]
+varsInExpr (Pool2DAvg k s p x) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p, Set.singleton (TensorVar x)]
+varsInExpr (Pool2DMax k s p x) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p, Set.singleton (TensorVar x)]
+varsInExpr (Relu x) = Set.singleton (TensorVar x)
+varsInExpr (MatMul x y) = Set.fromList [TensorVar x, TensorVar y]
+varsInExpr (EwAdd x y) = Set.fromList [TensorVar x, TensorVar y]
+varsInExpr (EwMul x y) = Set.fromList [TensorVar x, TensorVar y]
+varsInExpr (Mul x s) = Set.insert (TensorVar x) (varsInScalarTerm s)
+varsInExpr (Transpose x) = Set.singleton (TensorVar x)
+varsInExpr (Concat a x y) = Set.insert (TensorVar x) (Set.insert (TensorVar y) (varsInAxisTerm a))
+varsInExpr (Split0 a x) = Set.insert (TensorVar x) (varsInAxisTerm a)
+varsInExpr (Split1 a x) = Set.insert (TensorVar x) (varsInAxisTerm a)
+varsInExpr (Enlarge k x) = Set.insert (TensorVar x) (varsInKernel2DTerm k)
+varsInExpr (ConstPool k) = varsInKernel2DTerm k
+varsInExpr (ConstIConv k) = varsInKernel2DTerm k
+varsInExpr ConstImm = Set.empty
+varsInExpr ConstOne = Set.empty
+
+varsInKernel2DTerm :: Kernel2DTerm -> Set Var
+varsInKernel2DTerm (Kernel2DTermVar v) = Set.singleton (Kernel2DVar v)
+varsInKernel2DTerm (Kernel2DTermLit _) = Set.empty
+
+varsInStride2DTerm :: Stride2DTerm -> Set Var
+varsInStride2DTerm (Stride2DTermVar v) = Set.singleton (Stride2DVar v)
+varsInStride2DTerm (Stride2DTermLit _) = Set.empty
+
+varsInPadModeTerm :: PadModeTerm -> Set Var
+varsInPadModeTerm (PadModeTermVar v) = Set.singleton (PadModeVar v)
+varsInPadModeTerm (PadModeTermLit _) = Set.empty
+
+varsInActiModeTerm :: ActiModeTerm -> Set Var
+varsInActiModeTerm (ActiModeTermVar v) = Set.singleton (ActiModeVar v)
+varsInActiModeTerm (ActiModeTermLit _) = Set.empty
+
+varsInAxisTerm :: AxisTerm -> Set Var
+varsInAxisTerm (AxisTermVar v) = Set.singleton (AxisVar v)
+varsInAxisTerm (AxisTermLit _) = Set.empty
+
+varsInScalarTerm :: ScalarTerm -> Set Var
+varsInScalarTerm (ScalarTermVar v) = Set.singleton (ScalarVar v)
+varsInScalarTerm (ScalarTermLit _) = Set.empty
+varsInScalarTerm (ScalarMul a b) = varsInScalarTerm a `Set.union` varsInScalarTerm b
+
 
 tensorsInExpr :: Expr -> Set Tensor
 tensorsInExpr Input = Set.empty

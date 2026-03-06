@@ -29,23 +29,14 @@ s0 = t "s0"
 s1 :: Tensor
 s1 = t "s1"
 
-s2 :: Tensor
-s2 = t "s2"
-
 d0 :: Tensor
 d0 = t "d0"
 
 d1 :: Tensor
 d1 = t "d1"
 
-d2 :: Tensor
-d2 = t "d2"
-
-stride :: Stride2DTerm
-stride = Stride2DTermVar (Stride2DVariable "s")
-
 s :: Stride2DTerm
-s = stride
+s = Stride2DTermVar (Stride2DVariable "s")
 
 p :: PadModeTerm
 p = PadModeTermVar (PadModeVariable "p")
@@ -59,11 +50,29 @@ k = Kernel2DTermVar (Kernel2DVariable "k")
 a :: AxisTerm
 a = AxisTermVar (AxisVariable "a")
 
-scW :: ScalarTerm
-scW = ScalarTermVar (ScalarVariable "w")
+axis :: String -> AxisTerm
+axis = AxisTermVar . AxisVariable
 
-scY :: ScalarTerm
-scY = ScalarTermVar (ScalarVariable "y")
+sc :: String -> ScalarTerm
+sc = ScalarTermVar . ScalarVariable
+
+scalarVar :: String -> Var
+scalarVar = ScalarVar . ScalarVariable
+
+kernelVar :: String -> Var
+kernelVar = Kernel2DVar . Kernel2DVariable
+
+strideVar :: String -> Var
+strideVar = Stride2DVar . Stride2DVariable
+
+padVar :: String -> Var
+padVar = PadModeVar . PadModeVariable
+
+actiVar :: String -> Var
+actiVar = ActiModeVar . ActiModeVariable
+
+axisVar :: String -> Var
+axisVar = AxisVar . AxisVariable
 
 axis0 :: AxisTerm
 axis0 = AxisTermLit (AxisLiteral 0)
@@ -80,8 +89,20 @@ actNone = ActiModeTermLit ActNone
 actRelu :: ActiModeTerm
 actRelu = ActiModeTermLit ActRelu
 
+padValid :: PadModeTerm
+padValid = PadModeTermLit PadValid
+
 stride11 :: Stride2DTerm
 stride11 = Stride2DTermLit (Stride2DLiteral 1 1)
+
+strideLit :: Int -> Int -> Stride2DTerm
+strideLit x0 y0 = Stride2DTermLit (Stride2DLiteral x0 y0)
+
+scalarLit :: Int -> ScalarTerm
+scalarLit = ScalarTermLit . ScalarLiteral
+
+kernelLit :: Int -> Int -> Kernel2DTerm
+kernelLit x0 y0 = Kernel2DTermLit (Kernel2DLiteral x0 y0)
 
 conv2d :: Kernel2DTerm -> Stride2DTerm -> PadModeTerm -> ActiModeTerm -> Tensor -> Tensor -> Expr
 conv2d k0 s0' p0 c0 x0 y0 = Conv2D k0 s0' p0 c0 x0 y0

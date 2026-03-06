@@ -23,6 +23,7 @@ library
         IR.IR
         Short
         TASO
+        Substitutions.Match
         Substitutions.Substitution
         Serialize
     -- other-modules:

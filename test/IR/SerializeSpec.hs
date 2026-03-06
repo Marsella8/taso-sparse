@@ -30,7 +30,7 @@ serializeTensorSpec =
 serializeMatMulSpec :: Spec
 serializeMatMulSpec =
   it "serialize: matmul" $ do
-    let valueIn = MatMul x y
+    let valueIn = matMul x y
         correct = "(matmul (tensor x) (tensor y))"
         output = renderSExpr (toSExpr valueIn)
     output `shouldBe` correct
@@ -38,7 +38,7 @@ serializeMatMulSpec =
 serializeConv2DMixedParamsSpec :: Spec
 serializeConv2DMixedParamsSpec =
   it "serialize: conv2d mixed params" $ do
-    let valueIn = Conv2D k s padSame actRelu x y
+    let valueIn = conv2d k s padSame actRelu x y
         correct = "(conv2d (kernel2d k) (stride2d s) same relu (tensor x) (tensor y))"
         output = renderSExpr (toSExpr valueIn)
     output `shouldBe` correct
@@ -46,7 +46,7 @@ serializeConv2DMixedParamsSpec =
 serializeScalarLiteralSpec :: Spec
 serializeScalarLiteralSpec =
   it "serialize: scalar literal" $ do
-    let valueIn = Mul x (ScalarTermLit (ScalarLiteral 3))
+    let valueIn = mul x (scalarLit 3)
         correct = "(mul (tensor x) 3)"
         output = renderSExpr (toSExpr valueIn)
     output `shouldBe` correct
@@ -54,7 +54,7 @@ serializeScalarLiteralSpec =
 serializeInputSpec :: Spec
 serializeInputSpec =
   it "serialize: input" $ do
-    let valueIn = Input
+    let valueIn = inp
         correct = "(input)"
         output = renderSExpr (toSExpr valueIn)
     output `shouldBe` correct
@@ -62,7 +62,7 @@ serializeInputSpec =
 serializeAsstSpec :: Spec
 serializeAsstSpec =
   it "serialize: asst" $ do
-    let valueIn = (Tensor "out", Relu x)
+    let valueIn = (out, relu x)
         correct = "(asst (tensor out) (relu (tensor x)))"
         output = renderSExpr (toSExpr valueIn)
     output `shouldBe` correct
@@ -70,8 +70,7 @@ serializeAsstSpec =
 serializeGraphSpec :: Spec
 serializeGraphSpec =
   it "serialize: graph" $ do
-    let outTensor = Tensor "out"
-        graphIn = mustGraph [(x, inp), (outTensor, Relu x)]
+    let graphIn = mustGraph [(x, inp), (out, relu x)]
         correct = "(graph (asst (tensor out) (relu (tensor x))) (asst (tensor x) (input)))"
         output = renderSExpr (toSExpr graphIn)
     output `shouldBe` correct
@@ -79,14 +78,12 @@ serializeGraphSpec =
 serializeSubstitutionSpec :: Spec
 serializeSubstitutionSpec =
   it "serialize: substitution" $ do
-    let s0Tensor = Tensor "s0"
-        d0Tensor = Tensor "d0"
-        rw =
+    let rw =
           Substitution
-            { subSrc = mustGraph [(x, inp), (s0Tensor, Relu x)]
-            , subDst = mustGraph [(x, inp), (d0Tensor, Transpose x)]
+            { subSrc = mustGraph [(x, inp), (s0, relu x)]
+            , subDst = mustGraph [(x, inp), (d0, transpose x)]
             , subInputMap = mustBimap [(x, x)]
-            , subOutputMap = mustBimap [(s0Tensor, d0Tensor)]
+            , subOutputMap = mustBimap [(s0, d0)]
             }
         correct = "(substitution (graph (asst (tensor s0) (relu (tensor x))) (asst (tensor x) (input))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((tensor s0) (tensor d0))))"
         output = renderSExpr (toSExpr rw)

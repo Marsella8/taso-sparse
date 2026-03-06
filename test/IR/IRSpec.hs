@@ -12,6 +12,7 @@ spec = do
   duplicateAssignmentRejectedSpec
   undeclaredTensorRejectedSpec
   exprTensorVarsSpec
+  graphVarsSpec
   explicitInputsSpec
   outputsExcludeInputsSpec
 
@@ -26,7 +27,7 @@ varSortTensorSpec =
 varSortScalarSpec :: Spec
 varSortScalarSpec =
   it "ir: varSort scalar" $ do
-    let input = ScalarVar (ScalarVariable "a")
+    let input = scalarVar "a"
         correct = ScalarSort
         output = varSort input
     output `shouldBe` correct
@@ -34,10 +35,9 @@ varSortScalarSpec =
 duplicateAssignmentRejectedSpec :: Spec
 duplicateAssignmentRejectedSpec =
   it "ir: duplicate assignment rejected" $ do
-    let t = Tensor "t"
-        input =
-          [ (t, Relu x)
-          , (t, Transpose x)
+    let input =
+          [ (out, relu x)
+          , (out, transpose x)
           ]
         correct = Nothing :: Maybe Graph
         output = mkGraph input
@@ -46,7 +46,7 @@ duplicateAssignmentRejectedSpec =
 undeclaredTensorRejectedSpec :: Spec
 undeclaredTensorRejectedSpec =
   it "ir: undeclared tensor rejected" $ do
-    let input = [(z, Relu x)]
+    let input = [(z, relu x)]
         correct = Nothing :: Maybe Graph
         output = mkGraph input
     output `shouldBe` correct
@@ -57,6 +57,14 @@ exprTensorVarsSpec =
     let input = concatT axis0 x y
         correct = Set.fromList [x, y]
         output = tensorsInExpr input
+    output `shouldBe` correct
+
+graphVarsSpec :: Spec
+graphVarsSpec =
+  it "ir: graph vars" $ do
+    let graphIn = mustGraph [(x, inp), (out, mul x (sc "w"))]
+        correct = Set.fromList [TensorVar x, TensorVar out, scalarVar "w"]
+        output = varsInGraph graphIn
     output `shouldBe` correct
 
 explicitInputsSpec :: Spec

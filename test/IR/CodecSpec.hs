@@ -40,8 +40,8 @@ codecSubstitutionSmokeSpec =
   it "codec: roundtrip substitution smoke" $ do
     let rw =
           Substitution
-            { subSrc = mustGraph [(x, inp), (s0, Relu x)]
-            , subDst = mustGraph [(x, inp), (d0, Transpose x)]
+            { subSrc = mustGraph [(x, inp), (s0, relu x)]
+            , subDst = mustGraph [(x, inp), (d0, transpose x)]
             , subInputMap = mustBimap [(x, x)]
             , subOutputMap = mustBimap [(s0, d0)]
             }
@@ -72,26 +72,22 @@ mkCodecSubstitutionSpec label (i, rw) =
 
 codecExprCases :: [(String, Expr)]
 codecExprCases =
-  [ ("input", Input)
-  , ("conv2d-mixed", Conv2D kLit strideLit padSame actNone x1 x2)
-  , ("mul-nested-scalar", Mul x4 scalarDeep)
-  , ("concat-axis-var", Concat axisVar x1 x2)
+  [ ("input", inp)
+  , ("conv2d-mixed", conv2d kLit strideMixed padSame actNone x y)
+  , ("mul-nested-scalar", mul x scalarDeep)
+  , ("concat-axis-var", concatT a x y)
   , ("const-one", ConstOne)
   ]
   where
-    x1 = Tensor "x1"
-    x2 = Tensor "x2"
-    x4 = Tensor "x4"
-    axisVar = AxisTermVar (AxisVariable "ax")
-    kLit = Kernel2DTermLit (Kernel2DLiteral 3 5)
-    strideLit = Stride2DTermLit (Stride2DLiteral 2 1)
+    kLit = kernelLit 3 5
+    strideMixed = strideLit 2 1
     scalarDeep =
       ScalarMul
-        (ScalarTermVar (ScalarVariable "alpha"))
+        (sc "a")
         ( ScalarMul
-            (ScalarTermLit (ScalarLiteral (-3)))
+            (scalarLit (-3))
             ( ScalarMul
-                (ScalarTermVar (ScalarVariable "beta"))
-                (ScalarTermLit (ScalarLiteral 7))
+                (sc "b")
+                (scalarLit 7)
             )
         )

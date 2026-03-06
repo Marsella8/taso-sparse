@@ -135,11 +135,11 @@ axiom6 :: Axiom
 axiom6 =
   mustAxiom
     [ (x, inp)
-    , (s0, mul x scY)
-    , (out, mul (s0) scW)
+    , (s0, mul x (sc "y"))
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
-    , (out, mul x (ScalarMul scY scW))
+    , (out, mul x (ScalarMul (sc "y") (sc "w")))
     ]
     (out, out)
 
@@ -149,12 +149,12 @@ axiom7 =
     [ (x, inp)
     , (y, inp)
     , (s0, ewAdd x y)
-    , (out, mul (s0) scW)
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, mul x scW)
-    , (d1, mul y scW)
+    , (d0, mul x (sc "w"))
+    , (d1, mul y (sc "w"))
     , (out, ewAdd (d0) (d1))
     ]
     (out, out)
@@ -165,11 +165,11 @@ axiom8 =
     [ (x, inp)
     , (y, inp)
     , (s0, ewMul x y)
-    , (out, mul (s0) scW)
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, mul y scW)
+    , (d0, mul y (sc "w"))
     , (out, ewMul x (d0))
     ]
     (out, out)
@@ -222,10 +222,10 @@ axiom12 =
   mustAxiom
     [ (x, inp)
     , (s0, transpose x)
-    , (out, mul (s0) scW)
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
-    , (d0, mul x scW)
+    , (d0, mul x (sc "w"))
     , (out, transpose (d0))
     ]
     (out, out)
@@ -253,11 +253,11 @@ axiom14 =
     [ (x, inp)
     , (y, inp)
     , (s0, matMul x y)
-    , (out, mul (s0) scW)
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, mul y scW)
+    , (d0, mul y (sc "w"))
     , (out, matMul x (d0))
     ]
     (out, out)
@@ -301,13 +301,13 @@ axiom17 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, mul x scW)
-    , (out, conv2d k stride p c (s0) y)
+    , (s0, mul x (sc "w"))
+    , (out, conv2d k s p c (s0) y)
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, mul y scW)
-    , (out, conv2d k stride p c x (d0))
+    , (d0, mul y (sc "w"))
+    , (out, conv2d k s p c x (d0))
     ]
     (out, out)
 
@@ -316,13 +316,13 @@ axiom18 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, conv2d k stride p actNone x y)
-    , (out, mul (s0) scW)
+    , (s0, conv2d k s p actNone x y)
+    , (out, mul (s0) (sc "w"))
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, mul x scW)
-    , (out, conv2d k stride p actNone (d0) y)
+    , (d0, mul x (sc "w"))
+    , (out, conv2d k s p actNone (d0) y)
     ]
     (out, out)
 
@@ -333,13 +333,13 @@ axiom19 =
     , (y, inp)
     , (z, inp)
     , (s0, ewAdd y z)
-    , (out, conv2d k stride p actNone x (s0))
+    , (out, conv2d k s p actNone x (s0))
     ]
     [ (x, inp)
     , (y, inp)
     , (z, inp)
-    , (d0, conv2d k stride p actNone x y)
-    , (d1, conv2d k stride p actNone x z)
+    , (d0, conv2d k s p actNone x y)
+    , (d1, conv2d k s p actNone x z)
     , (out, ewAdd (d0) (d1))
     ]
     (out, out)
@@ -351,13 +351,13 @@ axiom20 =
     , (y, inp)
     , (z, inp)
     , (s0, ewAdd x y)
-    , (out, conv2d k stride p actNone (s0) z)
+    , (out, conv2d k s p actNone (s0) z)
     ]
     [ (x, inp)
     , (y, inp)
     , (z, inp)
-    , (d0, conv2d k stride p actNone x z)
-    , (d1, conv2d k stride p actNone y z)
+    , (d0, conv2d k s p actNone x z)
+    , (d1, conv2d k s p actNone y z)
     , (out, ewAdd (d0) (d1))
     ]
     (out, out)
@@ -367,12 +367,12 @@ axiom21 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (out, conv2d k stride padSame c x y)
+    , (out, conv2d k s padSame c x y)
     ]
     [ (x, inp)
     , (y, inp)
     , (d0, enlarge k y)
-    , (out, conv2d k stride padSame c x (d0))
+    , (out, conv2d k s padSame c x (d0))
     ]
     (out, out)
 
@@ -381,11 +381,11 @@ axiom22 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (out, conv2d k stride p actRelu x y)
+    , (out, conv2d k s p actRelu x y)
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, conv2d k stride p actNone x y)
+    , (d0, conv2d k s p actNone x y)
     , (out, relu (d0))
     ]
     (out, out)
@@ -408,10 +408,10 @@ axiom24 =
   mustAxiom
     [ (x, inp)
     , (s0, ConstPool k)
-    , (out, conv2d k stride p actNone x (s0))
+    , (out, conv2d k s p actNone x (s0))
     ]
     [ (x, inp)
-    , (out, pool2dAvg k stride p x)
+    , (out, pool2dAvg k s p x)
     ]
     (out, out)
 
@@ -504,14 +504,14 @@ axiom31 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, mul x scW)
-    , (s1, mul y scW)
+    , (s0, mul x (sc "w"))
+    , (s1, mul y (sc "w"))
     , (out, concatT a (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (d0, concatT a x y)
-    , (out, mul (d0) scW)
+    , (out, mul (d0) (sc "w"))
     ]
     (out, out)
 
@@ -634,15 +634,15 @@ axiom38 =
     [ (x, inp)
     , (y, inp)
     , (z, inp)
-    , (s0, conv2d k stride p c x z)
-    , (s1, conv2d k stride p c y z)
+    , (s0, conv2d k s p c x z)
+    , (s1, conv2d k s p c y z)
     , (out, concatT axis0 (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (z, inp)
     , (d0, concatT axis0 x y)
-    , (out, conv2d k stride p c (d0) z)
+    , (out, conv2d k s p c (d0) z)
     ]
     (out, out)
 
@@ -652,15 +652,15 @@ axiom39 =
     [ (x, inp)
     , (y, inp)
     , (z, inp)
-    , (s0, conv2d k stride p c x y)
-    , (s1, conv2d k stride p c x z)
+    , (s0, conv2d k s p c x y)
+    , (s1, conv2d k s p c x z)
     , (out, concatT axis1 (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (z, inp)
     , (d0, concatT axis0 y z)
-    , (out, conv2d k stride p c x (d0))
+    , (out, conv2d k s p c x (d0))
     ]
     (out, out)
 
@@ -673,14 +673,14 @@ axiom40 =
     , (w, inp)
     , (s0, concatT axis1 x z)
     , (s1, concatT axis1 y w)
-    , (out, conv2d k stride p actNone (s0) (s1))
+    , (out, conv2d k s p actNone (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (z, inp)
     , (w, inp)
-    , (d0, conv2d k stride p actNone x y)
-    , (d1, conv2d k stride p actNone z w)
+    , (d0, conv2d k s p actNone x y)
+    , (d1, conv2d k s p actNone z w)
     , (out, ewAdd (d0) (d1))
     ]
     (out, out)
@@ -690,14 +690,14 @@ axiom41 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, pool2dAvg k stride p x)
-    , (s1, pool2dAvg k stride p y)
+    , (s0, pool2dAvg k s p x)
+    , (s1, pool2dAvg k s p y)
     , (out, concatT axis1 (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (d0, concatT axis1 x y)
-    , (out, pool2dAvg k stride p (d0))
+    , (out, pool2dAvg k s p (d0))
     ]
     (out, out)
 
@@ -706,14 +706,14 @@ axiom42 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, pool2dMax k stride p x)
-    , (s1, pool2dMax k stride p y)
+    , (s0, pool2dMax k s p x)
+    , (s1, pool2dMax k s p y)
     , (out, concatT axis0 (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (d0, concatT axis0 x y)
-    , (out, pool2dMax k stride p (d0))
+    , (out, pool2dMax k s p (d0))
     ]
     (out, out)
 
@@ -722,14 +722,14 @@ axiom43 =
   mustAxiom
     [ (x, inp)
     , (y, inp)
-    , (s0, pool2dMax k stride p x)
-    , (s1, pool2dMax k stride p y)
+    , (s0, pool2dMax k s p x)
+    , (s1, pool2dMax k s p y)
     , (out, concatT axis1 (s0) (s1))
     ]
     [ (x, inp)
     , (y, inp)
     , (d0, concatT axis1 x y)
-    , (out, pool2dMax k stride p (d0))
+    , (out, pool2dMax k s p (d0))
     ]
     (out, out)
 
