@@ -2,6 +2,7 @@ module IR.Graph
   ( Graph(..)
   , mkGraph
   , mustGraph
+  , graphDisjointUnion
   , graphBindings
   , graphTensorVars
   , graphExprs
@@ -10,6 +11,8 @@ module IR.Graph
   , graphInternals
   , graphMustLookup
   , varsInGraph
+  , atomicGraphRename
+  , instantiateGraphTerms
   ) where
 
 import Control.Monad (guard)
@@ -40,6 +43,13 @@ mustGraph bindings =
     Just g -> g
     Nothing -> error "Invalid graph"
 
+graphDisjointUnion :: Graph -> Graph -> Maybe Graph
+graphDisjointUnion (Graph lhs) (Graph rhs)
+  | Set.null (Map.keysSet lhs `Set.intersection` Map.keysSet rhs) =
+      mkGraph (Map.toList lhs ++ Map.toList rhs)
+  | otherwise =
+      Nothing
+
 graphBindings :: Graph -> [(Tensor, Expr)]
 graphBindings (Graph m) = Map.toList m
 
@@ -68,5 +78,24 @@ graphMustLookup (Graph m) t = fromJust (Map.lookup t m)
 
 varsInGraph :: Graph -> Set Var
 varsInGraph g =
-  Set.map TensorVar (graphTensorVars g) `Set.union`
   Set.unions (Set.map varsInExpr (graphExprs g))
+
+removeDef :: Graph -> Tensor -> Graph
+removeDef (Graph m) t = Graph (Map.delete t m)
+
+atomicGraphRename :: Graph -> Map.Map Tensor Tensor -> Graph
+atomicGraphRename graph renameMap
+  | Set.isSubsetOf (Map.keysSet renameMap) (graphTensorVars graph) = mustGraph renamedBindings
+  | otherwise = error "Invalid rename map"
+  where
+    renamedBindings =
+      [ (atomicRenameTensor renameMap tensor, atomicExprRename renameMap expr)
+      | (tensor, expr) <- graphBindings graph
+      ]
+
+instantiateGraphTerms :: Graph -> Map.Map Var Term -> Graph
+instantiateGraphTerms graph@(Graph g) instantiateMap =
+  if Set.isSubsetOf (Map.keysSet instantiateMap) (varsInGraph graph)
+      && all (\(src, dst) -> varSort src == termSort dst) (Map.toList instantiateMap)
+    then Graph (Map.map (instantiateExprTerms instantiateMap) g)
+    else error "Invalid term instantiation map"

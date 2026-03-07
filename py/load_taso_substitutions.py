@@ -149,6 +149,12 @@ def _stride_expr(h: int, w: int) -> str:
     return f"(stride2d {h} {w})"
 
 
+def _bimap(pairs: list[str]) -> str:
+    if not pairs:
+        return "(bimap)"
+    return "(bimap " + " ".join(pairs) + ")"
+
+
 # --- conversion ---
 
 
@@ -278,36 +284,51 @@ def _graph_sexpr(ops: list[Op], prefix: str) -> tuple[str, dict[tuple[int, int],
     return "(graph " + " ".join(assts) + ")", lookup
 
 
-def _free_inputs(ops: list[Op]) -> set[int]:
+def _free_tensor_inputs(ops: list[Op]) -> set[int]:
     ids: set[int] = set()
     for op in ops:
         for inp in op.input:
-            if inp.opId < 0:
+            if inp.opId < 0 and inp.opId not in SCALAR_INPUT_OP_IDS:
                 ids.add(inp.opId)
     return ids
 
 
-def _rule_to_rewrite(rule: Rule) -> str:
+def _free_scalar_inputs(ops: list[Op]) -> set[int]:
+    ids: set[int] = set()
+    for op in ops:
+        for inp in op.input:
+            if inp.opId in SCALAR_INPUT_OP_IDS:
+                ids.add(inp.opId)
+    return ids
+
+
+def _rule_to_substitution(rule: Rule) -> str:
     src_graph, src_lookup = _graph_sexpr(rule.srcOp, "s")
     dst_graph, dst_lookup = _graph_sexpr(rule.dstOp, "d")
 
-    shared = _free_inputs(rule.srcOp) & _free_inputs(rule.dstOp)
-    tensor_ids = sorted([x for x in shared if x not in SCALAR_INPUT_OP_IDS], key=lambda x: -x)
+    shared_tensor_ids = sorted(_free_tensor_inputs(rule.srcOp) & _free_tensor_inputs(rule.dstOp), key=lambda x: -x)
+    shared_scalar_ids = sorted(_free_scalar_inputs(rule.srcOp) & _free_scalar_inputs(rule.dstOp), key=lambda x: -x)
 
     input_pairs: list[str] = []
-    for op_id in tensor_ids:
+    for op_id in shared_tensor_ids:
         n = f"t{-op_id}"
         input_pairs.append(f"((tensor {n}) (tensor {n}))")
-    input_bimap = "(bimap " + " ".join(input_pairs) + ")"
+    input_bimap = _bimap(input_pairs)
+
+    var_pairs: list[str] = []
+    for op_id in shared_scalar_ids:
+        n = f"s{-op_id}"
+        var_pairs.append(f"((scalar {n}) (scalar {n}))")
+    var_bimap = _bimap(var_pairs)
 
     output_pairs: list[str] = []
     for mo in rule.mappedOutput:
         src_name = src_lookup[(mo.srcOpId, mo.srcTsId)]
         dst_name = dst_lookup[(mo.dstOpId, mo.dstTsId)]
         output_pairs.append(f"((tensor {src_name}) (tensor {dst_name}))")
-    output_bimap = "(bimap " + " ".join(output_pairs) + ")"
+    output_bimap = _bimap(output_pairs)
 
-    return f"(substitution {src_graph} {dst_graph} {input_bimap} {output_bimap})"
+    return f"(substitution {src_graph} {dst_graph} {input_bimap} {var_bimap} {output_bimap})"
 
 
 # --- val ---
@@ -328,10 +349,6 @@ def _check_rule(idx: int, rule: Rule) -> None:
     src_lookup = _assign_names(rule.srcOp, "s")
     dst_lookup = _assign_names(rule.dstOp, "d")
 
-    src_free = _free_inputs(rule.srcOp)
-    dst_free = _free_inputs(rule.dstOp)
-    shared = src_free & dst_free
-
     src_assts = _expected_asst_count(rule.srcOp)
     dst_assts = _expected_asst_count(rule.dstOp)
     if src_assts != len(src_lookup):
@@ -348,11 +365,6 @@ def _check_rule(idx: int, rule: Rule) -> None:
     for op in rule.srcOp + rule.dstOp:
         if op.type not in OP_NAMES:
             raise ValueError(f"rule {idx}: unknown op type {op.type}")
-        for inp in op.input:
-            if inp.opId >= 0:
-                continue
-            if inp.opId not in shared and inp.opId in dst_free and inp.opId in src_free:
-                raise ValueError(f"rule {idx}: free input {inp.opId} in both sides but not in shared")
 
 
 # --- main ---
@@ -369,10 +381,10 @@ def main() -> None:
     lines: list[str] = []
     seen: set[str] = set()
     for rule in rules:
-        rewrite = _rule_to_rewrite(rule)
-        if rewrite not in seen:
-            seen.add(rewrite)
-            lines.append(rewrite)
+        substitution = _rule_to_substitution(rule)
+        if substitution not in seen:
+            seen.add(substitution)
+            lines.append(substitution)
 
     out = repo_root / OUTPUT_PATH
     out.parent.mkdir(parents=True, exist_ok=True)

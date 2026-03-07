@@ -2,10 +2,9 @@ module IR.SerializeSpec where
 
 import Axioms (axioms)
 import IR.Graph
-import IR.IR
 import Serialize (SExprSerialize(..), renderSExpr)
 import Short
-import Substitutions.Substitution (Substitution(..), mustBimap)
+import Substitutions.Substitution (Substitution(..), mustTensorBimap, mustVarBimap)
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
@@ -81,12 +80,13 @@ serializeSubstitutionSpec =
   it "serialize: substitution" $ do
     let rw =
           Substitution
-            { subSrc = mustGraph [(x, inp), (s0, relu x)]
-            , subDst = mustGraph [(x, inp), (d0, transpose x)]
-            , subInputMap = mustBimap [(x, x)]
-            , subOutputMap = mustBimap [(s0, d0)]
+            { subSrc = mustGraph [(x, inp), (out, mul x (sc "a"))]
+            , subDst = mustGraph [(x, inp), (d0, transpose x), (out, mul d0 (sc "a"))]
+            , subInputMap = mustTensorBimap [(x, x)]
+            , subVarMap = mustVarBimap [(scalarVar "a", scalarVar "a")]
+            , subOutputMap = mustTensorBimap [(out, out)]
             }
-        correct = "(substitution (graph (asst (tensor s0) (relu (tensor x))) (asst (tensor x) (input))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((tensor s0) (tensor d0))))"
+        correct = "(substitution (graph (asst (tensor out) (mul (tensor x) (scalar a))) (asst (tensor x) (input))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor out) (mul (tensor d0) (scalar a))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((scalar a) (scalar a))) (bimap ((tensor out) (tensor out))))"
         output = renderSExpr (toSExpr rw)
     output `shouldBe` correct
 
@@ -94,6 +94,6 @@ serializeAllAxiomsSpec :: Spec
 serializeAllAxiomsSpec =
   it "serialize: all axioms" $ do
     let axiomsIn = axioms
-        correct = 88
+        correct = 84
         output = length (map (renderSExpr . toSExpr) axiomsIn)
     output `shouldBe` correct

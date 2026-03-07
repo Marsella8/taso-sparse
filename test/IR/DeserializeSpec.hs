@@ -4,7 +4,7 @@ import Deserialize (fromSExprString)
 import IR.Graph
 import IR.IR
 import Short
-import Substitutions.Substitution (Bimap, Substitution(..), mustBimap)
+import Substitutions.Substitution (Substitution(..), TensorBimap, mustTensorBimap, mustVarBimap)
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
@@ -79,21 +79,22 @@ deserializeBimapSpec :: Spec
 deserializeBimapSpec =
   it "deserialize: bimap" $ do
     let input = "(bimap ((tensor x) (tensor y)))"
-        correct = Just (mustBimap [(x, y)])
-        output = fromSExprString input :: Maybe Bimap
+        correct = Just (mustTensorBimap [(x, y)])
+        output = fromSExprString input :: Maybe TensorBimap
     output `shouldBe` correct
 
 deserializeSubstitutionSpec :: Spec
 deserializeSubstitutionSpec =
   it "deserialize: substitution" $ do
-    let input = "(substitution (graph (asst (tensor s0) (relu (tensor x)))) (graph (asst (tensor d0) (transpose (tensor x)))) (bimap ((tensor x) (tensor x))) (bimap ((tensor s0) (tensor d0))))"
+    let input = "(substitution (graph (asst (tensor out) (mul (tensor x) (scalar a)))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor out) (mul (tensor d0) (scalar a)))) (bimap ((tensor x) (tensor x))) (bimap ((scalar a) (scalar a))) (bimap ((tensor out) (tensor out))))"
         correct =
           Just
             Substitution
-              { subSrc = mustGraph [(x, inp), (s0, relu x)]
-              , subDst = mustGraph [(x, inp), (d0, transpose x)]
-              , subInputMap = mustBimap [(x, x)]
-              , subOutputMap = mustBimap [(s0, d0)]
+              { subSrc = mustGraph [(x, inp), (out, mul x (sc "a"))]
+              , subDst = mustGraph [(x, inp), (d0, transpose x), (out, mul d0 (sc "a"))]
+              , subInputMap = mustTensorBimap [(x, x)]
+              , subVarMap = mustVarBimap [(scalarVar "a", scalarVar "a")]
+              , subOutputMap = mustTensorBimap [(out, out)]
               }
         output = fromSExprString input :: Maybe Substitution
     output `shouldBe` correct

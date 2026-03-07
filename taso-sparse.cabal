@@ -22,12 +22,14 @@ library
         Deserialize
         IR.Graph
         IR.IR
+        IR.Isomorphic
+        Search
         Short
+        Substitutions.Apply
         TASO
         Substitutions.Match
         Substitutions.Substitution
         Serialize
-    -- other-modules:
     -- other-extensions:
     build-depends:
         base ^>=4.18.3.0,
@@ -61,7 +63,9 @@ test-suite taso-sparse-test
         -- EventuallyDelete.SubstitutionSpec
         IR.CodecSpec
         IR.DeserializeSpec
+        IR.GraphSpec
         IR.IRSpec
+        IR.IsomorphicSpec
         IR.SerializeSpec
         SearchSpec
         Substitutions.ApplySpec

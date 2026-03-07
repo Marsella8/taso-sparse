@@ -64,7 +64,6 @@ instance SExprSerialize AxisVariable where
 instance SExprSerialize Var where
   toSExpr v =
     case v of
-      TensorVar t -> toSExpr t
       ScalarVar s -> toSExpr s
       Stride2DVar s -> toSExpr s
       Kernel2DVar k -> toSExpr k
@@ -149,8 +148,15 @@ instance SExprSerialize (BM.Bimap Tensor Tensor) where
     where
       pairExpr (k, v) = list [toSExpr k, toSExpr v]
 
+instance SExprSerialize (BM.Bimap Var Var) where
+  toSExpr bm =
+    list (atom "bimap" : map pairExpr (BM.toList bm))
+    where
+      pairExpr (k, v) = list [toSExpr k, toSExpr v]
+
 instance SExprSerialize Substitution where
-  toSExpr (Substitution srcGraph dstGraph input output) = list [atom "substitution", toSExpr srcGraph, toSExpr dstGraph, toSExpr input, toSExpr output]
+  toSExpr (Substitution srcGraph dstGraph input varMap output) =
+    list [atom "substitution", toSExpr srcGraph, toSExpr dstGraph, toSExpr input, toSExpr varMap, toSExpr output]
 
 write :: SExprSerialize a => FilePath -> [a] -> IO ()
 write path values = do

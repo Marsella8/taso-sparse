@@ -1,29 +1,22 @@
 module IR.IRSpec where
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import IR.Graph
 import IR.IR
 import Short
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
 spec = do
-  varSortTensorSpec
   varSortScalarSpec
-  duplicateAssignmentRejectedSpec
-  undeclaredTensorRejectedSpec
+  atomicRenameTensorSpec
+  atomicExprRenameSpec
+  atomicExprRenamePreservesNonTensorTermsSpec
+  instantiateExprTermsSpec
+  instantiateExprTermsIsAtomicSpec
+  instantiateExprTermsPreservesTensorsSpec
+  instantiateExprTermsRewritesDifferentSortsSpec
   exprTensorVarsSpec
-  graphVarsSpec
-  explicitInputsSpec
-  outputsExcludeInputsSpec
-
-varSortTensorSpec :: Spec
-varSortTensorSpec =
-  it "ir: varSort tensor" $ do
-    let input = TensorVar x
-        correct = TensorSort
-        output = varSort input
-    output `shouldBe` correct
 
 varSortScalarSpec :: Spec
 varSortScalarSpec =
@@ -33,23 +26,74 @@ varSortScalarSpec =
         output = varSort input
     output `shouldBe` correct
 
-duplicateAssignmentRejectedSpec :: Spec
-duplicateAssignmentRejectedSpec =
-  it "ir: duplicate assignment rejected" $ do
-    let input =
-          [ (out, relu x)
-          , (out, transpose x)
-          ]
-        correct = Nothing :: Maybe Graph
-        output = mkGraph input
+atomicRenameTensorSpec :: Spec
+atomicRenameTensorSpec =
+  it "ir: atomic tensor rename" $ do
+    let renameMap = Map.fromList [(x, y), (y, z)]
+    atomicRenameTensor renameMap x `shouldBe` y
+    atomicRenameTensor renameMap y `shouldBe` z
+    atomicRenameTensor renameMap out `shouldBe` out
+
+atomicExprRenameSpec :: Spec
+atomicExprRenameSpec =
+  it "ir: atomic expr rename" $ do
+    let renameMap = Map.fromList [(x, y), (y, z)]
+        input = matMul x y
+        correct = matMul y z
+        output = atomicExprRename renameMap input
     output `shouldBe` correct
 
-undeclaredTensorRejectedSpec :: Spec
-undeclaredTensorRejectedSpec =
-  it "ir: undeclared tensor rejected" $ do
-    let input = [(z, relu x)]
-        correct = Nothing :: Maybe Graph
-        output = mkGraph input
+atomicExprRenamePreservesNonTensorTermsSpec :: Spec
+atomicExprRenamePreservesNonTensorTermsSpec =
+  it "ir: atomic expr rename leaves non-tensor terms alone" $ do
+    let renameMap = Map.fromList [(x, y), (y, z)]
+        input = conv2d (kernelLit 3 3) stride11 padSame actRelu x y
+        correct = conv2d (kernelLit 3 3) stride11 padSame actRelu y z
+        output = atomicExprRename renameMap input
+    output `shouldBe` correct
+
+instantiateExprTermsSpec :: Spec
+instantiateExprTermsSpec =
+  it "ir: instantiate expr terms" $ do
+    let instantiateMap =
+          Map.fromList
+            [ (scalarVar "u", ScalarTm (scalarLit 2))
+            , (axisVar "a", AxisTm axis1)
+            ]
+        input = concatT (axis "a") x y
+        correct = concatT axis1 x y
+        output = instantiateExprTerms instantiateMap input
+    output `shouldBe` correct
+
+instantiateExprTermsIsAtomicSpec :: Spec
+instantiateExprTermsIsAtomicSpec =
+  it "ir: instantiate expr terms is atomic" $ do
+    let instantiateMap =
+          Map.fromList
+            [ (scalarVar "u", ScalarTm (sc "v"))
+            , (scalarVar "v", ScalarTm (scalarLit 2))
+            ]
+        input = mul x (ScalarMul (sc "u") (sc "v"))
+        correct = mul x (ScalarMul (sc "v") (scalarLit 2))
+        output = instantiateExprTerms instantiateMap input
+    output `shouldBe` correct
+
+instantiateExprTermsPreservesTensorsSpec :: Spec
+instantiateExprTermsPreservesTensorsSpec =
+  it "ir: instantiate expr terms leaves tensors alone" $ do
+    let instantiateMap = Map.fromList [(scalarVar "u", ScalarTm (ScalarMul (scalarLit 2) (sc "v")))]
+        input = mul x (sc "u")
+        correct = mul x (ScalarMul (scalarLit 2) (sc "v"))
+        output = instantiateExprTerms instantiateMap input
+    output `shouldBe` correct
+
+instantiateExprTermsRewritesDifferentSortsSpec :: Spec
+instantiateExprTermsRewritesDifferentSortsSpec =
+  it "ir: instantiate expr terms rewrites different term sorts" $ do
+    let instantiateMap = Map.fromList [(kernelVar "k", Kernel2DTm (kernelLit 3 3))]
+        input = ConstPool k
+        correct = ConstPool (kernelLit 3 3)
+        output = instantiateExprTerms instantiateMap input
     output `shouldBe` correct
 
 exprTensorVarsSpec :: Spec
@@ -58,39 +102,4 @@ exprTensorVarsSpec =
     let input = concatT axis0 x y
         correct = Set.fromList [x, y]
         output = tensorsInExpr input
-    output `shouldBe` correct
-
-graphVarsSpec :: Spec
-graphVarsSpec =
-  it "ir: graph vars" $ do
-    let graphIn = mustGraph [(x, inp), (out, mul x (sc "w"))]
-        correct = Set.fromList [TensorVar x, TensorVar out, scalarVar "w"]
-        output = varsInGraph graphIn
-    output `shouldBe` correct
-
-explicitInputsSpec :: Spec
-explicitInputsSpec =
-  it "ir: explicit inputs" $ do
-    let graphIn =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (z, ewAdd x y)
-            ]
-        correct = Set.fromList [x, y]
-        output = graphInputs graphIn
-    output `shouldBe` correct
-
-outputsExcludeInputsSpec :: Spec
-outputsExcludeInputsSpec =
-  it "ir: outputs exclude used vars" $ do
-    let graphIn =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (z, ewAdd x y)
-            , (w, ewAdd z x)
-            ]
-        correct = Set.fromList [w]
-        output = graphOutputs graphIn
     output `shouldBe` correct

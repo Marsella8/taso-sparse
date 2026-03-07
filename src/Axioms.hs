@@ -34,8 +34,6 @@ fwdAxiomsBase =
   , axiom25
   , axiom26
   , axiom27
-  , axiom28
-  , axiom29
   , axiom30
   , axiom31
   , axiom32
@@ -60,7 +58,6 @@ bwdAxioms = map invertAxiom fwdAxioms
 
 axioms :: [Substitution]
 axioms = map axiomToSubstitution (fwdAxioms ++ bwdAxioms)
-
 
 axiom1 :: Axiom
 axiom1 =
@@ -453,33 +450,47 @@ axiom27 =
 
 axiom28 :: Axiom
 axiom28 =
-  mustAxiom
-    [ (x, inp)
-    , (y, inp)
-    , (s0, concatT a x y)
-    , (out, split0 a (s0))
-    ]
-    [ (x, inp)
-    , (y, inp)
-    , (d0, concatT a x y)
-    , (out, split0 a (d0))
-    ]
-    (out, out)
+  -- Manual single-output approximation of split0(a, concat(a, x, y)) = x.
+  Axiom
+    { axiomSrc =
+        mustGraph
+          [ (x, inp)
+          , (y, inp)
+          , (s0, concatT a x y)
+          , (out, split0 a s0)
+          ]
+    , axiomDst =
+        mustGraph
+          [ (x, inp)
+          , (y, inp)
+          ]
+    , axiomInputMap = mustTensorBimap [(x, x), (y, y)]
+    , axiomVarMap = mustVarBimap []
+    , axiomSrcOut = out
+    , axiomDstOut = x
+    }
 
 axiom29 :: Axiom
 axiom29 =
-  mustAxiom
-    [ (x, inp)
-    , (y, inp)
-    , (s0, concatT a x y)
-    , (out, split1 a (s0))
-    ]
-    [ (x, inp)
-    , (y, inp)
-    , (d0, concatT a x y)
-    , (out, split1 a (d0))
-    ]
-    (out, out)
+  -- Manual single-output approximation of split1(a, concat(a, x, y)) = y.
+  Axiom
+    { axiomSrc =
+        mustGraph
+          [ (x, inp)
+          , (y, inp)
+          , (s0, concatT a x y)
+          , (out, split1 a s0)
+          ]
+    , axiomDst =
+        mustGraph
+          [ (x, inp)
+          , (y, inp)
+          ]
+    , axiomInputMap = mustTensorBimap [(x, x), (y, y)]
+    , axiomVarMap = mustVarBimap []
+    , axiomSrcOut = out
+    , axiomDstOut = y
+    }
 
 axiom30 :: Axiom
 axiom30 =

@@ -5,7 +5,7 @@ import qualified Data.Set as Set
 import IR.Graph
 import IR.IR
 import Short
-import Substitutions.Match (Match(..), TargetMatch(..), matchIsComplete, matchRootedSubgraphToGraph)
+import Substitutions.Match (Match(..), matchIsComplete, matchRootedSubgraphToGraph, splitMatchTermMap)
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
@@ -24,6 +24,7 @@ spec = do
   repeatedTensorBindingRejectsInconsistentTargetSpec
   repeatedScalarBindingMatchesWhenConsistentSpec
   repeatedScalarBindingRejectsInconsistentTargetSpec
+  distinctSourceScalarVarsMayAliasSameTargetTermSpec
   scalarVariableMatchesNestedScalarExpressionSpec
   scalarMulRequiresScalarMulStructureSpec
   scalarLiteralDoesNotAbstractTargetScalarVariableSpec
@@ -40,10 +41,11 @@ spec = do
   constConstructorsDoNotCrossMatchSpec
   completenessRejectsMissingTensorBindingSpec
   completenessRejectsMissingTermBindingSpec
+  splitMatchTermMapSeparatesVarAndConcreteBindingsSpec
 
-matchOf :: [(Var, TargetMatch)] -> Match
-matchOf = Match . Map.fromList
-
+matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
+matchOf tensorBindings termBindings =
+  Match (Map.fromList tensorBindings) (Map.fromList termBindings)
 
 identityMatchSpec :: Spec
 identityMatchSpec =
@@ -51,11 +53,7 @@ identityMatchSpec =
     let graphIn = mustGraph [(x, inp), (y, inp), (out, matMul x y)]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor x)
-              , (TensorVar y, TargetTensor y)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (y, y), (out, out)] [])
         output = matchRootedSubgraphToGraph graphIn out graphIn
     output `shouldBe` correct
 
@@ -66,10 +64,7 @@ inputConcreteMatchesTensorSpec =
         targetGraph = mustGraph [(s0, ConstImm), (out, transpose s0)]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor s0)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, s0), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -80,9 +75,9 @@ singleSrcTensorMatchesSpec =
         targetGraph = mustGraph [(x, inp), (s0, matMul x x), (out, transpose s0)]
         correct =
           Set.fromList
-            [ matchOf [(TensorVar x, TargetTensor x)]
-            , matchOf [(TensorVar x, TargetTensor s0)]
-            , matchOf [(TensorVar x, TargetTensor out)]
+            [ matchOf [(x, x)] []
+            , matchOf [(x, s0)] []
+            , matchOf [(x, out)] []
             ]
         output = matchRootedSubgraphToGraph srcGraph x targetGraph
     output `shouldBe` correct
@@ -103,21 +98,9 @@ nestedExprsMatchesSpec =
             ]
         correct =
           Set.fromList
-            [ matchOf
-                [ (TensorVar x, TargetTensor x)
-                , (TensorVar y, TargetTensor y)
-                , (TensorVar out, TargetTensor s0)
-                ]
-            , matchOf
-                [ (TensorVar x, TargetTensor z)
-                , (TensorVar y, TargetTensor w)
-                , (TensorVar out, TargetTensor s1)
-                ]
-            , matchOf
-                [ (TensorVar x, TargetTensor s0)
-                , (TensorVar y, TargetTensor s1)
-                , (TensorVar out, TargetTensor out)
-                ]
+            [ matchOf [(x, x), (y, y), (out, s0)] []
+            , matchOf [(x, z), (y, w), (out, s1)] []
+            , matchOf [(x, s0), (y, s1), (out, out)] []
             ]
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
@@ -129,11 +112,7 @@ distinctSourceTensorsMayAliasSameTargetTensorSpec =
         targetGraph = mustGraph [(z, inp), (out, matMul z z)]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor z)
-              , (TensorVar y, TargetTensor z)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, z), (y, z), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -156,13 +135,7 @@ nestedSourceInputsMayCollapseOntoOneTargetInputSpec =
             ]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor w)
-              , (TensorVar y, TargetTensor w)
-              , (TensorVar z, TargetTensor w)
-              , (TensorVar s0, TargetTensor d0)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, w), (y, w), (z, w), (s0, d0), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -185,13 +158,7 @@ sourceInputMayAliasMatchedInternalTargetTensorSpec =
             ]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor w)
-              , (TensorVar y, TargetTensor w)
-              , (TensorVar z, TargetTensor d0)
-              , (TensorVar s0, TargetTensor d0)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, w), (y, w), (z, d0), (s0, d0), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -215,14 +182,7 @@ distinctSourceInternalTensorsMayAliasSameTargetInternalTensorSpec =
             ]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor w)
-              , (TensorVar y, TargetTensor w)
-              , (TensorVar z, TargetTensor w)
-              , (TensorVar s0, TargetTensor d0)
-              , (TensorVar s1, TargetTensor d0)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, w), (y, w), (z, w), (s0, d0), (s1, d0), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -253,10 +213,7 @@ rootedMatchIgnoresDisconnectedSourceBindingsSpec =
         targetGraph = mustGraph [(x, inp), (out, transpose x)]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar x, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -267,10 +224,7 @@ repeatedTensorBindingMatchesWhenConsistentSpec =
         targetGraph = mustGraph [(x, inp), (out, matMul x x)]
         correct =
           Set.singleton
-            (matchOf
-              [ (TensorVar s0, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(s0, x), (out, out)] [])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -289,11 +243,7 @@ repeatedScalarBindingMatchesWhenConsistentSpec =
         targetGraph = mustGraph [(x, inp), (out, mul x (ScalarMul (scalarLit 2) (scalarLit 2)))]
         correct =
           Set.singleton
-            (matchOf
-              [ (scalarVar "w", TargetTerm (ScalarTm (scalarLit 2)))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (out, out)] [(scalarVar "w", ScalarTm (scalarLit 2))])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -305,6 +255,21 @@ repeatedScalarBindingRejectsInconsistentTargetSpec =
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` Set.empty
 
+distinctSourceScalarVarsMayAliasSameTargetTermSpec :: Spec
+distinctSourceScalarVarsMayAliasSameTargetTermSpec =
+  it "match: distinct source scalar variables may alias the same target term" $ do
+    let srcGraph = mustGraph [(x, inp), (out, mul x (ScalarMul (sc "s0") (sc "s1")))]
+        targetGraph = mustGraph [(x, inp), (out, mul x (ScalarMul (sc "s") (sc "s")))]
+        correct =
+          Set.singleton
+            (matchOf
+              [(x, x), (out, out)]
+              [ (scalarVar "s0", ScalarTm (sc "s"))
+              , (scalarVar "s1", ScalarTm (sc "s"))
+              ])
+        output = matchRootedSubgraphToGraph srcGraph out targetGraph
+    output `shouldBe` correct
+
 scalarVariableMatchesNestedScalarExpressionSpec :: Spec
 scalarVariableMatchesNestedScalarExpressionSpec =
   it "match: scalar variables can bind to nested scalar expressions" $ do
@@ -313,11 +278,7 @@ scalarVariableMatchesNestedScalarExpressionSpec =
         targetGraph = mustGraph [(x, inp), (out, mul x targetScalar)]
         correct =
           Set.singleton
-            (matchOf
-              [ (scalarVar "w", TargetTerm (ScalarTm targetScalar))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (out, out)] [(scalarVar "w", ScalarTm targetScalar)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -360,12 +321,7 @@ axisVariableMatchesAxisLiteralSpec =
         targetGraph = mustGraph [(x, inp), (y, inp), (out, concatT axis1 x y)]
         correct =
           Set.singleton
-            (matchOf
-              [ (axisVar "a", TargetTerm (AxisTm axis1))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar y, TargetTensor y)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (y, y), (out, out)] [(axisVar "a", AxisTm axis1)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -385,10 +341,7 @@ kernelVariableMatchesKernelLiteralSpec =
         targetGraph = mustGraph [(out, ConstPool targetKernel)]
         correct =
           Set.singleton
-            (matchOf
-              [ (kernelVar "k", TargetTerm (Kernel2DTm targetKernel))
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(out, out)] [(kernelVar "k", Kernel2DTm targetKernel)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -416,11 +369,7 @@ strideVariableMatchesStrideLiteralSpec =
         targetGraph = mustGraph [(x, inp), (out, pool2dAvg targetKernel stride11 padSame x)]
         correct =
           Set.singleton
-            (matchOf
-              [ (strideVar "s", TargetTerm (Stride2DTm stride11))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (out, out)] [(strideVar "s", Stride2DTm stride11)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -433,11 +382,7 @@ padVariableMatchesPadLiteralSpec =
         targetGraph = mustGraph [(x, inp), (out, pool2dMax targetKernel stride11 targetPad x)]
         correct =
           Set.singleton
-            (matchOf
-              [ (padVar "p", TargetTerm (PadModeTm targetPad))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (out, out)] [(padVar "p", PadModeTm targetPad)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -449,12 +394,7 @@ actiVariableMatchesActiLiteralSpec =
         targetGraph = mustGraph [(x, inp), (y, inp), (out, conv2d targetKernel stride11 padSame actRelu x y)]
         correct =
           Set.singleton
-            (matchOf
-              [ (actiVar "c", TargetTerm (ActiModeTm actRelu))
-              , (TensorVar x, TargetTensor x)
-              , (TensorVar y, TargetTensor y)
-              , (TensorVar out, TargetTensor out)
-              ])
+            (matchOf [(x, x), (y, y), (out, out)] [(actiVar "c", ActiModeTm actRelu)])
         output = matchRootedSubgraphToGraph srcGraph out targetGraph
     output `shouldBe` correct
 
@@ -470,16 +410,31 @@ completenessRejectsMissingTensorBindingSpec :: Spec
 completenessRejectsMissingTensorBindingSpec =
   it "match: completeness requires every source tensor binding" $ do
     let srcGraph = mustGraph [(x, inp), (out, transpose x)]
-        partialMatch = matchOf [(TensorVar x, TargetTensor x)]
+        partialMatch = matchOf [(x, x)] []
     matchIsComplete srcGraph partialMatch `shouldBe` False
 
 completenessRejectsMissingTermBindingSpec :: Spec
 completenessRejectsMissingTermBindingSpec =
   it "match: completeness requires every source term binding" $ do
     let srcGraph = mustGraph [(x, inp), (out, mul x (sc "w"))]
-        partialMatch =
-          matchOf
-            [ (TensorVar x, TargetTensor x)
-            , (TensorVar out, TargetTensor out)
-            ]
+        partialMatch = matchOf [(x, x), (out, out)] []
     matchIsComplete srcGraph partialMatch `shouldBe` False
+
+splitMatchTermMapSeparatesVarAndConcreteBindingsSpec :: Spec
+splitMatchTermMapSeparatesVarAndConcreteBindingsSpec =
+  it "match: splitMatchTermMap separates variable bindings from concrete terms" $ do
+    let match =
+          matchOf
+            []
+            [ (scalarVar "w", ScalarTm (sc "u"))
+            , (axisVar "a", AxisTm axis1)
+            , (scalarVar "z", ScalarTm (ScalarMul (scalarLit 2) (sc "u")))
+            ]
+        correctVarMap = Map.fromList [(scalarVar "w", scalarVar "u")]
+        correctTermMap =
+          Map.fromList
+            [ (axisVar "a", AxisTm axis1)
+            , (scalarVar "z", ScalarTm (ScalarMul (scalarLit 2) (sc "u")))
+            ]
+        output = splitMatchTermMap match
+    output `shouldBe` (correctVarMap, correctTermMap)

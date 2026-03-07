@@ -6,7 +6,7 @@ import IR.Graph
 import IR.IR
 import Serialize (SExprSerialize(..), renderSExpr)
 import Short
-import Substitutions.Substitution (Substitution(..), mustBimap)
+import Substitutions.Substitution (Substitution(..), mustTensorBimap, mustVarBimap)
 import qualified TASO
 import Test.Hspec (Spec, it, runIO, shouldBe)
 
@@ -41,10 +41,11 @@ codecSubstitutionSmokeSpec =
   it "codec: roundtrip substitution smoke" $ do
     let rw =
           Substitution
-            { subSrc = mustGraph [(x, inp), (s0, relu x)]
-            , subDst = mustGraph [(x, inp), (d0, transpose x)]
-            , subInputMap = mustBimap [(x, x)]
-            , subOutputMap = mustBimap [(s0, d0)]
+            { subSrc = mustGraph [(x, inp), (out, mul x (sc "a"))]
+            , subDst = mustGraph [(x, inp), (d0, transpose x), (out, mul d0 (sc "a"))]
+            , subInputMap = mustTensorBimap [(x, x)]
+            , subVarMap = mustVarBimap [(scalarVar "a", scalarVar "a")]
+            , subOutputMap = mustTensorBimap [(out, out)]
             }
         correct = Just rw
         output = fromSExprString (renderSExpr (toSExpr rw)) :: Maybe Substitution

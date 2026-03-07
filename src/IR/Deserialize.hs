@@ -9,7 +9,7 @@ import qualified Data.Set as Set
 import IR.Graph
 import IR.IR
 import Serialize (SExpr(..))
-import Substitutions.Substitution (Substitution(..), mkBimap, mkSubstitution)
+import Substitutions.Substitution (Substitution(..), mkSubstitution, mkTensorBimap, mkVarBimap)
 import Text.Read (readMaybe)
 
 class SExprDeserialize a where
@@ -61,8 +61,7 @@ instance SExprDeserialize AxisVariable where
 
 instance SExprDeserialize Var where
   fromSExpr sx =
-    (TensorVar <$> fromSExpr sx)
-      <|> (ScalarVar <$> fromSExpr sx)
+    (ScalarVar <$> fromSExpr sx)
       <|> (Stride2DVar <$> fromSExpr sx)
       <|> (Kernel2DVar <$> fromSExpr sx)
       <|> (PadModeVar <$> fromSExpr sx)
@@ -146,28 +145,38 @@ instance SExprDeserialize Graph where
 instance SExprDeserialize (BM.Bimap Tensor Tensor) where
   fromSExpr (SList (SAtom "bimap" : pairExprs)) = do
     pairs <- mapM parsePair pairExprs
-    mkBimap pairs
+    mkTensorBimap pairs
+    where
+      parsePair (SList [kExpr, vExpr]) = (,) <$> fromSExpr kExpr <*> fromSExpr vExpr
+      parsePair _ = Nothing
+  fromSExpr _ = Nothing
+
+instance SExprDeserialize (BM.Bimap Var Var) where
+  fromSExpr (SList (SAtom "bimap" : pairExprs)) = do
+    pairs <- mapM parsePair pairExprs
+    mkVarBimap pairs
     where
       parsePair (SList [kExpr, vExpr]) = (,) <$> fromSExpr kExpr <*> fromSExpr vExpr
       parsePair _ = Nothing
   fromSExpr _ = Nothing
 
 instance SExprDeserialize Substitution where
-  fromSExpr (SList [SAtom "substitution", srcExpr, dstExpr, inExpr, outExpr]) =
-    parseSubstitution srcExpr dstExpr inExpr outExpr
+  fromSExpr (SList [SAtom "substitution", srcExpr, dstExpr, inExpr, varExpr, outExpr]) =
+    parseSubstitution srcExpr dstExpr inExpr varExpr outExpr
   fromSExpr _ = Nothing
 
-parseSubstitution :: SExpr -> SExpr -> SExpr -> SExpr -> Maybe Substitution
-parseSubstitution srcExpr dstExpr inExpr outExpr = do
+parseSubstitution :: SExpr -> SExpr -> SExpr -> SExpr -> SExpr -> Maybe Substitution
+parseSubstitution srcExpr dstExpr inExpr varExpr outExpr = do
   srcGraph0 <- fromSExpr srcExpr
   dstGraph0 <- fromSExpr dstExpr
   inMap <- fromSExpr inExpr
+  varMap <- fromSExpr varExpr
   outMap <- fromSExpr outExpr
   let srcInputs = Set.fromList [t | (t, _) <- BM.toList inMap]
       dstInputs = Set.fromList [t | (_, t) <- BM.toList inMap]
       srcBindings = ensureInputBindings srcInputs (graphBindings srcGraph0)
       dstBindings = ensureInputBindings dstInputs (graphBindings dstGraph0)
-  mkSubstitution srcBindings dstBindings (BM.toList inMap) (BM.toList outMap)
+  mkSubstitution srcBindings dstBindings (BM.toList inMap) (BM.toList varMap) (BM.toList outMap)
 
 addInferredInputs :: [(Tensor, Expr)] -> [(Tensor, Expr)]
 addInferredInputs bindings = ensureInputBindings inferredInputs bindings

@@ -7,54 +7,57 @@ import IR.Graph
 import IR.IR
 import Substitutions.Substitution (Axiom(..))
 
-data TargetMatch = TargetTensor Tensor | TargetTerm Term
-  deriving (Eq, Ord, Show)
-
--- for each variable in the source graph of the substitution, map to either a tensor variable or a target term in the target graph
--- note: slight invalid representation where a Var like Tensor can point to a targetMatch that is not Tensor (Term). So use the bind below to be safe)
-newtype Match = Match
-  { matchMap :: Map.Map Var TargetMatch
+data Match = Match
+  { matchTensorMap :: Map.Map Tensor Tensor
+  , matchTermMap :: Map.Map Var Term
   }
   deriving (Eq, Ord, Show)
 
 emptyMatch :: Match
-emptyMatch = Match Map.empty
+emptyMatch = Match Map.empty Map.empty
 
 bindTensor :: Match -> Tensor -> Tensor -> Maybe Match
-bindTensor match srcTensor targetTensor =
-  bindTargetMatch match (TensorVar srcTensor) (TargetTensor targetTensor)
+bindTensor (Match tensorMap termMap) srcTensor targetTensor = do
+  tensorMap' <- bindMapping tensorMap srcTensor targetTensor
+  pure (Match tensorMap' termMap)
 
 bindTerm :: Match -> Var -> Term -> Maybe Match
-bindTerm match srcVar targetTerm =
-  bindTargetMatch match srcVar (TargetTerm targetTerm)
+bindTerm (Match tensorMap termMap) srcVar targetTerm = do
+  termMap' <- bindMapping termMap srcVar targetTerm
+  pure (Match tensorMap termMap')
 
-bindTargetMatch :: Match -> Var -> TargetMatch -> Maybe Match
-bindTargetMatch (Match match) srcVar targetMatch =
-  case Map.lookup srcVar match of
-    Nothing -> Just (Match (Map.insert srcVar targetMatch match))
-    Just existingTargetMatch ->
-      if existingTargetMatch == targetMatch
-        then Just (Match match)
+bindMapping :: (Ord k, Eq v) => Map.Map k v -> k -> v -> Maybe (Map.Map k v)
+bindMapping matchMap srcKey targetValue =
+  case Map.lookup srcKey matchMap of
+    Nothing -> Just (Map.insert srcKey targetValue matchMap)
+    Just existingTargetValue ->
+      if existingTargetValue == targetValue
+        then Just matchMap
         else Nothing
 
-isAssigned :: Match -> Var -> Bool
-isAssigned (Match match) v = Map.member v match
-
 matchIsWellSorted :: Match -> Bool
-matchIsWellSorted (Match match) = all isWellSorted (Map.toList match)
+matchIsWellSorted (Match _ termMap) =
+  all isWellSorted (Map.toList termMap)
   where
-    isWellSorted (v, TargetTensor t) = isWellSortedTensor v t
-    isWellSorted (v, TargetTerm t) = isWellSortedTerm v t
-
-    isWellSortedTensor :: Var -> Tensor -> Bool
-    isWellSortedTensor v _ = varSort v == TensorSort
-
-    isWellSortedTerm :: Var -> Term -> Bool
-    isWellSortedTerm v t = varSort v == termSort t
+    isWellSorted (v, t) = varSort v == termSort t
 
 matchIsComplete :: Graph -> Match -> Bool
-matchIsComplete srcGraph (Match match) =
-  varsInGraph srcGraph == Map.keysSet match
+matchIsComplete srcGraph (Match tensorMap termMap) =
+  graphTensorVars srcGraph == Map.keysSet tensorMap &&
+  varsInGraph srcGraph == Map.keysSet termMap
+
+splitMatchTermMap :: Match -> (Map.Map Var Var, Map.Map Var Term)
+splitMatchTermMap (Match _ termMap) =
+  (Map.mapMaybe termAsVar termMap, Map.filter (maybe True (const False) . termAsVar) termMap)
+
+termAsVar :: Term -> Maybe Var
+termAsVar (ScalarTm (ScalarTermVar var)) = Just (ScalarVar var)
+termAsVar (Stride2DTm (Stride2DTermVar var)) = Just (Stride2DVar var)
+termAsVar (Kernel2DTm (Kernel2DTermVar var)) = Just (Kernel2DVar var)
+termAsVar (PadModeTm (PadModeTermVar var)) = Just (PadModeVar var)
+termAsVar (ActiModeTm (ActiModeTermVar var)) = Just (ActiModeVar var)
+termAsVar (AxisTm (AxisTermVar var)) = Just (AxisVar var)
+termAsVar _ = Nothing
 
 matchAxiom :: Axiom -> Graph -> Set.Set Match
 matchAxiom axiom targetGraph =
@@ -72,20 +75,17 @@ matchRootedSubgraphToGraph srcGraph srcGraphOut targetGraph =
       (\targetOut -> matchTensors srcGraph targetGraph srcGraphOut targetOut emptyMatch)
       (Set.toList (graphTensorVars targetGraph))
 
--- Given some partial match between the source and the target graph, recursively try to fill the remaining match
 matchTensors :: Graph -> Graph -> Tensor -> Tensor -> Match -> Maybe Match
 matchTensors srcGraph targetGraph srcTensor targetTensor partialMatch = do
-  case bindTensor partialMatch srcTensor targetTensor of
-    Nothing -> Nothing --variable was already assigned
-    Just partialMatch' -> do
-      let srcExpr = graphMustLookup srcGraph srcTensor
-      let targetExpr = graphMustLookup targetGraph targetTensor
-      matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch'
+  partialMatch' <- bindTensor partialMatch srcTensor targetTensor
+  let srcExpr = graphMustLookup srcGraph srcTensor
+  let targetExpr = graphMustLookup targetGraph targetTensor
+  matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch'
 
 matchExpressions :: Graph -> Graph -> Expr -> Expr -> Match -> Maybe Match
 matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch = case (srcExpr, targetExpr) of
   (Input, _) -> Just partialMatch
-  (_, Input) -> Nothing -- we are trying to match an input in the target with a non-input in the source
+  (_, Input) -> Nothing
   (Conv2D k1 s1 p1 a1 x1 y1, Conv2D k2 s2 p2 a2 x2 y2) -> matchKernel2DTerms k1 k2 partialMatch >>= matchStride2DTerms s1 s2 >>= matchPadModeTerms p1 p2 >>= matchActiModeTerms a1 a2 >>= matchTnsrs x1 x2 >>= matchTnsrs y1 y2
   (Pool2DAvg k1 s1 p1 x1, Pool2DAvg k2 s2 p2 x2) -> matchKernel2DTerms k1 k2 partialMatch >>= matchStride2DTerms s1 s2 >>= matchPadModeTerms p1 p2 >>= matchTnsrs x1 x2
   (Pool2DMax k1 s1 p1 x1, Pool2DMax k2 s2 p2 x2) -> matchKernel2DTerms k1 k2 partialMatch >>= matchStride2DTerms s1 s2 >>= matchPadModeTerms p1 p2 >>= matchTnsrs x1 x2
@@ -103,9 +103,10 @@ matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch = case (sr
   (ConstIConv k1, ConstIConv k2) -> matchKernel2DTerms k1 k2 partialMatch
   (ConstImm, ConstImm) -> Just partialMatch
   (ConstOne, ConstOne) -> Just partialMatch
-  (_, _) -> Nothing -- neither is input, and the expressions are not of the same type
-  where 
+  (_, _) -> Nothing
+  where
     matchTnsrs = matchTensors srcGraph targetGraph
+
 
 -- for term binding, the following rules hold:
 -- 1) If both are variables, we can bind them
@@ -122,7 +123,7 @@ matchScalarTerms srcTerm targetTerm partialMatch = case (srcTerm, targetTerm) of
   (ScalarTermVar v1, ScalarTermLit l2) -> bindTerm partialMatch (ScalarVar v1) (ScalarTm (ScalarTermLit l2))
   (ScalarTermLit _, _) -> Nothing
   (ScalarMul a1 b1, ScalarMul a2 b2) -> matchScalarTerms a1 a2 partialMatch >>= matchScalarTerms b1 b2
-  (ScalarMul _ _, _) -> Nothing -- source requires there to be a scalar mul, but target does not have it
+  (ScalarMul _ _, _) -> Nothing
   (ScalarTermVar v1, ScalarMul a1 b1) -> bindTerm partialMatch (ScalarVar v1) (ScalarTm (ScalarMul a1 b1))
 
 matchStride2DTerms :: Stride2DTerm -> Stride2DTerm -> Match -> Maybe Match
