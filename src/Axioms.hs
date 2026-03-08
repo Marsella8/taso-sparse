@@ -19,7 +19,8 @@ fwdSubs =
   , axiom11
   , axiom12
   , axiom13
-  , axiom14
+  , axiom14a
+  , axiom14b
   , axiom15
   , axiom16
   , axiom17
@@ -246,8 +247,8 @@ axiom13 =
     ]
     (out, out)
 
-axiom14 :: Substitution
-axiom14 =
+axiom14a :: Substitution
+axiom14a =
   mustSub
     [ (x, inp)
     , (y, inp)
@@ -258,6 +259,21 @@ axiom14 =
     , (y, inp)
     , (d0, mul y (sc "w"))
     , (out, matMul x (d0))
+    ]
+    (out, out)
+
+axiom14b :: Substitution
+axiom14b =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (s0, matMul x y)
+    , (out, mul (s0) (sc "w"))
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (d0, mul x (sc "w"))
+    , (out, matMul (d0) y)
     ]
     (out, out)
 
@@ -361,17 +377,21 @@ axiom20 =
     ]
     (out, out)
 
+-- TODO: this is not really correct
 axiom21 :: Substitution
 axiom21 =
+  let k1 = Kernel2DTermVar (Kernel2DVariable "k1")
+      k2 = Kernel2DTermVar (Kernel2DVariable "k2")
+  in
   mustSub
     [ (x, inp)
     , (y, inp)
-    , (out, conv2d k s padSame c x y)
+    , (out, conv2d k1 s padSame c x y)
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, enlarge k y)
-    , (out, conv2d k s padSame c x (d0))
+    , (d0, enlarge k2 y)
+    , (out, conv2d k2 s padSame c x (d0))
     ]
     (out, out)
 
@@ -741,4 +761,3 @@ axiom44 =
     [ (out, ConstPool k)
     ]
     (out, out)
-
