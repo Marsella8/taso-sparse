@@ -38,7 +38,7 @@ newtype ActiModeVariable = ActiModeVariable String
 newtype AxisVariable = AxisVariable String
   deriving (Eq, Ord, Read, Show)
 
--- note! Var does not include Tensor! In general, Var, Lit, and Term are used for non-tensor datatypes.
+-- note! Var does not include Tensor. In general, Var and Term are used for non-tensor datatypes.
 data Var
   = ScalarVar ScalarVariable
   | Stride2DVar Stride2DVariable
@@ -82,25 +82,6 @@ newtype AxisLiteral = AxisLiteral Int
 
 newtype ScalarLiteral = ScalarLiteral Int
   deriving (Eq, Ord, Read, Show)
-
-data Lit
-  = LitStride2D Stride2DLiteral
-  | LitKernel2D Kernel2DLiteral
-  | LitPadMode PadMode
-  | LitActiMode ActiMode
-  | LitAxis AxisLiteral
-  | LitScalar ScalarLiteral
-  deriving (Eq, Ord, Read, Show)
-
-literalSort :: Lit -> Sort
-literalSort lit =
-  case lit of
-    LitStride2D _ -> Stride2DSort
-    LitKernel2D _ -> Kernel2DSort
-    LitPadMode _ -> PadModeSort
-    LitActiMode _ -> ActiModeSort
-    LitAxis _ -> AxisSort
-    LitScalar _ -> ScalarSort
 
 -- terms (which is sum type of vars and literals)
 
@@ -271,6 +252,14 @@ atomicExprRename renameMap expr =
 atomicRenameTensor :: Map.Map Tensor Tensor -> Tensor -> Tensor
 atomicRenameTensor renameMap tensor =
   Map.findWithDefault tensor tensor renameMap
+
+freshTensors :: Set Tensor -> [Tensor]
+freshTensors used =
+  [ t
+  | i <- [0 :: Int ..]
+  , let t = Tensor ("r" ++ show i)
+  , Set.notMember t used
+  ]
 
 instantiateExprTerms :: Map.Map Var Term -> Expr -> Expr
 instantiateExprTerms instantiateMap expr =

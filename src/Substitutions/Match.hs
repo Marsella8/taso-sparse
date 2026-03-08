@@ -1,11 +1,12 @@
 module Substitutions.Match where
 
 import Data.Maybe (mapMaybe)
+import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import IR.Graph
 import IR.IR
-import Substitutions.Substitution (Axiom(..))
+import Substitutions.Substitution (Substitution(..))
 
 data Match = Match
   { matchTensorMap :: Map.Map Tensor Tensor
@@ -46,34 +47,23 @@ matchIsComplete srcGraph (Match tensorMap termMap) =
   graphTensorVars srcGraph == Map.keysSet tensorMap &&
   varsInGraph srcGraph == Map.keysSet termMap
 
-splitMatchTermMap :: Match -> (Map.Map Var Var, Map.Map Var Term)
-splitMatchTermMap (Match _ termMap) =
-  (Map.mapMaybe termAsVar termMap, Map.filter (maybe True (const False) . termAsVar) termMap)
-
-termAsVar :: Term -> Maybe Var
-termAsVar (ScalarTm (ScalarTermVar var)) = Just (ScalarVar var)
-termAsVar (Stride2DTm (Stride2DTermVar var)) = Just (Stride2DVar var)
-termAsVar (Kernel2DTm (Kernel2DTermVar var)) = Just (Kernel2DVar var)
-termAsVar (PadModeTm (PadModeTermVar var)) = Just (PadModeVar var)
-termAsVar (ActiModeTm (ActiModeTermVar var)) = Just (ActiModeVar var)
-termAsVar (AxisTm (AxisTermVar var)) = Just (AxisVar var)
-termAsVar _ = Nothing
-
-matchAxiom :: Axiom -> Graph -> Set.Set Match
-matchAxiom axiom targetGraph =
-  Set.filter isValidMatch $
-    matchRootedSubgraphToGraph (axiomSrc axiom) (axiomSrcOut axiom) targetGraph
+matchSubstitution :: Substitution -> Graph -> Set.Set Match
+matchSubstitution sub targetGraph =
+  Set.filter isValidMatch allMatches
   where
+    srcGraph = subSrc sub
+    srcOuts = Set.toAscList (graphOutputs srcGraph)
+    targetAll = Set.toList (graphTensorVars targetGraph)
+
     isValidMatch match =
       matchIsWellSorted match &&
-      matchIsComplete (axiomSrc axiom) match
+      matchIsComplete srcGraph match
 
-matchRootedSubgraphToGraph :: Graph -> Tensor -> Graph -> Set.Set Match
-matchRootedSubgraphToGraph srcGraph srcGraphOut targetGraph =
-  Set.fromList $
-    mapMaybe
-      (\targetOut -> matchTensors srcGraph targetGraph srcGraphOut targetOut emptyMatch)
-      (Set.toList (graphTensorVars targetGraph))
+    allMatches = Set.fromList $
+      foldl' expandWithOutput [emptyMatch] srcOuts
+
+    expandWithOutput partials srcOut =
+      concatMap (\m -> mapMaybe (\tgt -> matchTensors srcGraph targetGraph srcOut tgt m) targetAll) partials
 
 matchTensors :: Graph -> Graph -> Tensor -> Tensor -> Match -> Maybe Match
 matchTensors srcGraph targetGraph srcTensor targetTensor partialMatch = do
@@ -106,15 +96,6 @@ matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch = case (sr
   (_, _) -> Nothing
   where
     matchTnsrs = matchTensors srcGraph targetGraph
-
-
--- for term binding, the following rules hold:
--- 1) If both are variables, we can bind them
--- 2) If both are literals, they have to be equal or the match is not valid
--- 3) If the src is a variable and the target is a literal, we can bind the variable to the literal
--- 4) If the src is a literal and the target is a variable, we cannot bind the literal to the variable
--- (3 and 4 are because we can concretize a variable when substituting, but we cannot "abstract it")
--- for scalar, it's slightly more involved because they can be nested expressions
 
 matchScalarTerms :: ScalarTerm -> ScalarTerm -> Match -> Maybe Match
 matchScalarTerms srcTerm targetTerm partialMatch = case (srcTerm, targetTerm) of

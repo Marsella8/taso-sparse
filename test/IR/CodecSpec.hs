@@ -1,6 +1,6 @@
 module IR.CodecSpec where
 
-import Axioms (axioms)
+import Axioms (allSubs)
 import Deserialize (fromSExprString)
 import IR.Graph
 import IR.IR
@@ -34,7 +34,7 @@ codecAxiomRoundTripSpec :: Spec
 codecAxiomRoundTripSpec =
   mapM_
     (mkCodecSubstitutionSpec "codec: roundtrip axiom substitution #")
-    (zip [1 :: Int ..] axioms)
+    (zip [1 :: Int ..] allSubs)
 
 codecSubstitutionSmokeSpec :: Spec
 codecSubstitutionSmokeSpec =

@@ -25,6 +25,7 @@ spec = do
   repeatedTensorUsesMustStayRepeatedSpec
   scalarVariablesCanBeAlphaRenamedSpec
   scalarVariableConsistencyMustBePreservedSpec
+  scalarTermShapeMustBePreservedSpec
   literalsDoNotMatchVariablesSpec
   convParameterVariablesCanBeAlphaRenamedSpec
 
@@ -248,8 +249,8 @@ sharedSubgraphsMustRemainSharedSpec =
           mustGraph
             [ (x, inp)
             , (t "mid", transpose x)
-            , (t "o1", relu (t "mid"))
-            , (t "o2", ewAdd (t "mid") (t "mid"))
+            , (o1, relu (t "mid"))
+            , (o2, ewAdd (t "mid") (t "mid"))
             ]
         rhs =
           mustGraph
@@ -304,6 +305,21 @@ scalarVariableConsistencyMustBePreservedSpec =
           mustGraph
             [ (t "a", inp)
             , (t "b", mul (t "a") (ScalarMul (sc "m") (sc "n")))
+            ]
+    isomorphicGraphs lhs rhs `shouldBe` False
+
+scalarTermShapeMustBePreservedSpec :: Spec
+scalarTermShapeMustBePreservedSpec =
+  it "isomorphic: scalar term structure must match, not just the leaves" $ do
+    let lhs =
+          mustGraph
+            [ (x, inp)
+            , (out, mul x (ScalarMul (sc "u") (sc "v")))
+            ]
+        rhs =
+          mustGraph
+            [ (t "a", inp)
+            , (t "b", mul (t "a") (sc "m"))
             ]
     isomorphicGraphs lhs rhs `shouldBe` False
 

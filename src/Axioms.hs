@@ -1,12 +1,11 @@
 module Axioms where
 
-import IR.Graph
 import IR.IR
 import Short
 import Substitutions.Substitution
 
-fwdAxiomsBase :: [Axiom]
-fwdAxiomsBase =
+fwdSubs :: [Substitution]
+fwdSubs =
   [ axiom1
   , axiom2
   , axiom3
@@ -34,6 +33,8 @@ fwdAxiomsBase =
   , axiom25
   , axiom26
   , axiom27
+  -- , axiom28
+  -- , axiom29
   , axiom30
   , axiom31
   , axiom32
@@ -48,20 +49,18 @@ fwdAxiomsBase =
   , axiom41
   , axiom42
   , axiom43
+  , axiom44
   ]
 
-fwdAxioms :: [Axiom]
-fwdAxioms = fwdAxiomsBase ++ [axiom44]
+bwdSubs :: [Substitution]
+bwdSubs = map invertSubstitution fwdSubs
 
-bwdAxioms :: [Axiom]
-bwdAxioms = map invertAxiom fwdAxioms
+allSubs :: [Substitution]
+allSubs = fwdSubs ++ bwdSubs
 
-axioms :: [Substitution]
-axioms = map axiomToSubstitution (fwdAxioms ++ bwdAxioms)
-
-axiom1 :: Axiom
+axiom1 :: Substitution
 axiom1 =
-  mustAxiom
+  mustSub
     [ (x, inp), (y, inp), (z, inp)
     , (s0, ewAdd y z)
     , (out, ewAdd x s0)
@@ -72,9 +71,9 @@ axiom1 =
     ]
     (out, out)
 
-axiom2 :: Axiom
+axiom2 :: Substitution
 axiom2 =
-  mustAxiom
+  mustSub
     [ (x, inp), (y, inp)
     , (out, ewAdd x y)
     ]
@@ -83,9 +82,9 @@ axiom2 =
     ]
     (out, out)
 
-axiom3 :: Axiom
+axiom3 :: Substitution
 axiom3 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -100,9 +99,9 @@ axiom3 =
     ]
     (out, out)
 
-axiom4 :: Axiom
+axiom4 :: Substitution
 axiom4 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (out, ewMul x y)
@@ -113,9 +112,9 @@ axiom4 =
     ]
     (out, out)
 
-axiom5 :: Axiom
+axiom5 :: Substitution
 axiom5 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -131,9 +130,9 @@ axiom5 =
     ]
     (out, out)
 
-axiom6 :: Axiom
+axiom6 :: Substitution
 axiom6 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, mul x (sc "y"))
     , (out, mul (s0) (sc "w"))
@@ -143,9 +142,9 @@ axiom6 =
     ]
     (out, out)
 
-axiom7 :: Axiom
+axiom7 :: Substitution
 axiom7 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, ewAdd x y)
@@ -159,9 +158,9 @@ axiom7 =
     ]
     (out, out)
 
-axiom8 :: Axiom
+axiom8 :: Substitution
 axiom8 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, ewMul x y)
@@ -174,9 +173,9 @@ axiom8 =
     ]
     (out, out)
 
-axiom9 :: Axiom
+axiom9 :: Substitution
 axiom9 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, transpose x)
     , (out, transpose (s0))
@@ -185,9 +184,9 @@ axiom9 =
     ]
     (out, x)
 
-axiom10 :: Axiom
+axiom10 :: Substitution
 axiom10 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, ewAdd x y)
@@ -201,9 +200,9 @@ axiom10 =
     ]
     (out, out)
 
-axiom11 :: Axiom
+axiom11 :: Substitution
 axiom11 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, ewMul x y)
@@ -217,9 +216,9 @@ axiom11 =
     ]
     (out, out)
 
-axiom12 :: Axiom
+axiom12 :: Substitution
 axiom12 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, transpose x)
     , (out, mul (s0) (sc "w"))
@@ -230,9 +229,9 @@ axiom12 =
     ]
     (out, out)
 
-axiom13 :: Axiom
+axiom13 :: Substitution
 axiom13 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -247,9 +246,9 @@ axiom13 =
     ]
     (out, out)
 
-axiom14 :: Axiom
+axiom14 :: Substitution
 axiom14 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, matMul x y)
@@ -262,9 +261,9 @@ axiom14 =
     ]
     (out, out)
 
-axiom15 :: Axiom
+axiom15 :: Substitution
 axiom15 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -280,9 +279,9 @@ axiom15 =
     ]
     (out, out)
 
-axiom16 :: Axiom
+axiom16 :: Substitution
 axiom16 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, matMul x y)
@@ -296,9 +295,9 @@ axiom16 =
     ]
     (out, out)
 
-axiom17 :: Axiom
+axiom17 :: Substitution
 axiom17 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, mul x (sc "w"))
@@ -311,9 +310,9 @@ axiom17 =
     ]
     (out, out)
 
-axiom18 :: Axiom
+axiom18 :: Substitution
 axiom18 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, conv2d k s p actNone x y)
@@ -326,9 +325,9 @@ axiom18 =
     ]
     (out, out)
 
-axiom19 :: Axiom
+axiom19 :: Substitution
 axiom19 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -344,9 +343,9 @@ axiom19 =
     ]
     (out, out)
 
-axiom20 :: Axiom
+axiom20 :: Substitution
 axiom20 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -362,9 +361,9 @@ axiom20 =
     ]
     (out, out)
 
-axiom21 :: Axiom
+axiom21 :: Substitution
 axiom21 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (out, conv2d k s padSame c x y)
@@ -376,9 +375,9 @@ axiom21 =
     ]
     (out, out)
 
-axiom22 :: Axiom
+axiom22 :: Substitution
 axiom22 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (out, conv2d k s p actRelu x y)
@@ -390,9 +389,9 @@ axiom22 =
     ]
     (out, out)
 
-axiom23 :: Axiom
+axiom23 :: Substitution
 axiom23 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, transpose x)
     , (out, relu (s0))
@@ -403,9 +402,9 @@ axiom23 =
     ]
     (out, out)
 
-axiom24 :: Axiom
+axiom24 :: Substitution
 axiom24 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, ConstPool k)
     , (out, conv2d k s p actNone x (s0))
@@ -415,9 +414,9 @@ axiom24 =
     ]
     (out, out)
 
-axiom25 :: Axiom
+axiom25 :: Substitution
 axiom25 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, ConstIConv k)
     , (out, conv2d k stride11 padSame actNone x (s0))
@@ -426,9 +425,9 @@ axiom25 =
     ]
     (out, x)
 
-axiom26 :: Axiom
+axiom26 :: Substitution
 axiom26 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, ConstImm)
     , (out, matMul x (s0))
@@ -437,9 +436,9 @@ axiom26 =
     ]
     (out, x)
 
-axiom27 :: Axiom
+axiom27 :: Substitution
 axiom27 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (s0, ConstOne)
     , (out, ewMul x (s0))
@@ -448,53 +447,39 @@ axiom27 =
     ]
     (out, x)
 
-axiom28 :: Axiom
+axiom28 :: Substitution
 axiom28 =
-  -- Manual single-output approximation of split0(a, concat(a, x, y)) = x.
-  Axiom
-    { axiomSrc =
-        mustGraph
-          [ (x, inp)
-          , (y, inp)
-          , (s0, concatT a x y)
-          , (out, split0 a s0)
-          ]
-    , axiomDst =
-        mustGraph
-          [ (x, inp)
-          , (y, inp)
-          ]
-    , axiomInputMap = mustTensorBimap [(x, x), (y, y)]
-    , axiomVarMap = mustVarBimap []
-    , axiomSrcOut = out
-    , axiomDstOut = x
-    }
+  mustSubstitution
+    [ (x, inp)
+    , (y, inp)
+    , (s0, concatT a x y)
+    , (out, split0 a s0)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    ]
+    [(x, x), (y, y)]
+    []
+    [(out, x)]
 
-axiom29 :: Axiom
+axiom29 :: Substitution
 axiom29 =
-  -- Manual single-output approximation of split1(a, concat(a, x, y)) = y.
-  Axiom
-    { axiomSrc =
-        mustGraph
-          [ (x, inp)
-          , (y, inp)
-          , (s0, concatT a x y)
-          , (out, split1 a s0)
-          ]
-    , axiomDst =
-        mustGraph
-          [ (x, inp)
-          , (y, inp)
-          ]
-    , axiomInputMap = mustTensorBimap [(x, x), (y, y)]
-    , axiomVarMap = mustVarBimap []
-    , axiomSrcOut = out
-    , axiomDstOut = y
-    }
+  mustSubstitution
+    [ (x, inp)
+    , (y, inp)
+    , (s0, concatT a x y)
+    , (out, split1 a s0)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    ]
+    [(x, x), (y, y)]
+    []
+    [(out, y)]
 
-axiom30 :: Axiom
+axiom30 :: Substitution
 axiom30 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -513,9 +498,9 @@ axiom30 =
     ]
     (out, out)
 
-axiom31 :: Axiom
+axiom31 :: Substitution
 axiom31 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, mul x (sc "w"))
@@ -529,9 +514,9 @@ axiom31 =
     ]
     (out, out)
 
-axiom32 :: Axiom
+axiom32 :: Substitution
 axiom32 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -550,9 +535,9 @@ axiom32 =
     ]
     (out, out)
 
-axiom33 :: Axiom
+axiom33 :: Substitution
 axiom33 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -571,9 +556,9 @@ axiom33 =
     ]
     (out, out)
 
-axiom34 :: Axiom
+axiom34 :: Substitution
 axiom34 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, relu x)
@@ -587,9 +572,9 @@ axiom34 =
     ]
     (out, out)
 
-axiom35 :: Axiom
+axiom35 :: Substitution
 axiom35 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, transpose x)
@@ -603,9 +588,9 @@ axiom35 =
     ]
     (out, out)
 
-axiom36 :: Axiom
+axiom36 :: Substitution
 axiom36 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -621,9 +606,9 @@ axiom36 =
     ]
     (out, out)
 
-axiom37 :: Axiom
+axiom37 :: Substitution
 axiom37 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -642,9 +627,9 @@ axiom37 =
     ]
     (out, out)
 
-axiom38 :: Axiom
+axiom38 :: Substitution
 axiom38 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -660,9 +645,9 @@ axiom38 =
     ]
     (out, out)
 
-axiom39 :: Axiom
+axiom39 :: Substitution
 axiom39 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -678,9 +663,9 @@ axiom39 =
     ]
     (out, out)
 
-axiom40 :: Axiom
+axiom40 :: Substitution
 axiom40 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (z, inp)
@@ -699,9 +684,9 @@ axiom40 =
     ]
     (out, out)
 
-axiom41 :: Axiom
+axiom41 :: Substitution
 axiom41 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, pool2dAvg k s p x)
@@ -715,9 +700,9 @@ axiom41 =
     ]
     (out, out)
 
-axiom42 :: Axiom
+axiom42 :: Substitution
 axiom42 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, pool2dMax k s p x)
@@ -731,9 +716,9 @@ axiom42 =
     ]
     (out, out)
 
-axiom43 :: Axiom
+axiom43 :: Substitution
 axiom43 =
-  mustAxiom
+  mustSub
     [ (x, inp)
     , (y, inp)
     , (s0, pool2dMax k s p x)
@@ -747,12 +732,13 @@ axiom43 =
     ]
     (out, out)
 
-axiom44 :: Axiom
+axiom44 :: Substitution
 axiom44 =
-  mustAxiom
+  mustSub
     [ (s0, ConstIConv k)
     , (out, pool2dAvg k stride11 padSame (s0))
     ]
     [ (out, ConstPool k)
     ]
     (out, out)
+

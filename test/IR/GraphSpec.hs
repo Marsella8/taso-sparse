@@ -12,15 +12,10 @@ spec :: Spec
 spec = do
   duplicateAssignmentRejectedSpec
   undeclaredTensorRejectedSpec
-  graphDisjointUnionCombinesDisconnectedGraphsSpec
-  graphDisjointUnionRejectsOverlappingDefinitionsSpec
   graphTensorVarsSpec
   graphVarsSpec
   explicitInputsSpec
   outputsExcludeInputsSpec
-  atomicGraphRenameChainsBindingsSpec
-  atomicGraphRenameSwapsBindingsSpec
-  atomicGraphRenameLeavesUnmappedBindingsAloneSpec
   instantiateGraphTermsIsAtomicSpec
   instantiateGraphTermsSwapsScalarBindingsAtomicallySpec
   instantiateGraphTermsLeavesUnmappedBindingsAloneSpec
@@ -42,47 +37,6 @@ duplicateAssignmentRejectedSpec =
           ]
         correct = Nothing :: Maybe Graph
         output = mkGraph input
-    output `shouldBe` correct
-
-graphDisjointUnionCombinesDisconnectedGraphsSpec :: Spec
-graphDisjointUnionCombinesDisconnectedGraphsSpec =
-  it "graph: disjoint union combines graphs with distinct definitions" $ do
-    let lhs =
-          mustGraph
-            [ (x, inp)
-            , (y, transpose x)
-            ]
-        rhs =
-          mustGraph
-            [ (z, inp)
-            , (out, relu z)
-            ]
-        correct =
-          Just $
-            mustGraph
-              [ (x, inp)
-              , (y, transpose x)
-              , (z, inp)
-              , (out, relu z)
-              ]
-        output = graphDisjointUnion lhs rhs
-    output `shouldBe` correct
-
-graphDisjointUnionRejectsOverlappingDefinitionsSpec :: Spec
-graphDisjointUnionRejectsOverlappingDefinitionsSpec =
-  it "graph: disjoint union rejects overlapping tensor definitions" $ do
-    let lhs =
-          mustGraph
-            [ (x, inp)
-            , (y, transpose x)
-            ]
-        rhs =
-          mustGraph
-            [ (y, inp)
-            , (out, relu y)
-            ]
-        correct = Nothing :: Maybe Graph
-        output = graphDisjointUnion lhs rhs
     output `shouldBe` correct
 
 undeclaredTensorRejectedSpec :: Spec
@@ -134,65 +88,6 @@ outputsExcludeInputsSpec =
             ]
         correct = Set.fromList [w]
         output = graphOutputs graphIn
-    output `shouldBe` correct
-
-atomicGraphRenameChainsBindingsSpec :: Spec
-atomicGraphRenameChainsBindingsSpec =
-  it "graph: graph rename is atomic across chained bindings" $ do
-    let graphIn =
-          mustGraph
-            [ (x, inp)
-            , (y, transpose x)
-            , (w, matMul x y)
-            ]
-        renameMap = Map.fromList [(x, y), (y, z)]
-        correct =
-          mustGraph
-            [ (y, inp)
-            , (z, transpose y)
-            , (w, matMul y z)
-            ]
-        output = atomicGraphRename graphIn renameMap
-    output `shouldBe` correct
-
-atomicGraphRenameSwapsBindingsSpec :: Spec
-atomicGraphRenameSwapsBindingsSpec =
-  it "graph: graph rename is atomic across swapped tensor names" $ do
-    let graphIn =
-          mustGraph
-            [ (x, inp)
-            , (y, transpose x)
-            , (out, matMul x y)
-            ]
-        renameMap = Map.fromList [(x, y), (y, x)]
-        correct =
-          mustGraph
-            [ (y, inp)
-            , (x, transpose y)
-            , (out, matMul y x)
-            ]
-        output = atomicGraphRename graphIn renameMap
-    output `shouldBe` correct
-
-atomicGraphRenameLeavesUnmappedBindingsAloneSpec :: Spec
-atomicGraphRenameLeavesUnmappedBindingsAloneSpec =
-  it "graph: graph rename only changes mapped tensors" $ do
-    let graphIn =
-          mustGraph
-            [ (x, inp)
-            , (y, transpose x)
-            , (z, inp)
-            , (out, matMul y z)
-            ]
-        renameMap = Map.fromList [(x, s0), (y, d0)]
-        correct =
-          mustGraph
-            [ (s0, inp)
-            , (d0, transpose s0)
-            , (z, inp)
-            , (out, matMul d0 z)
-            ]
-        output = atomicGraphRename graphIn renameMap
     output `shouldBe` correct
 
 instantiateGraphTermsIsAtomicSpec :: Spec

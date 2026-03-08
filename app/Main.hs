@@ -1,36 +1,52 @@
+{-# LANGUAGE BangPatterns #-}
+
 module Main where
 
-import Axioms (bwdAxioms, fwdAxioms)
+import Axioms (allSubs)
+import Control.Parallel.Strategies (parMap, rseq)
 import qualified Data.Set as Set
-import IR.Isomorphic (isomorphicGraphs)
-import Search (SearchConfig(..), saturateUnderAxioms)
-import Substitutions.Substitution (Axiom, Substitution(..))
+import Search (SearchConfig(..), saturateUnderSubstitutions)
+import Serialize (SExprSerialize(..), renderSExpr)
+import System.Environment (getArgs)
+import System.IO (BufferMode(LineBuffering), hSetBuffering, stdout)
+import Substitutions.Substitution (Substitution(..))
 import TASO (substitutions)
 
 main :: IO ()
 main = do
-  let searchConfig =
+  hSetBuffering stdout LineBuffering
+  args <- getArgs
+  let verbose = "--missed" `elem` args
+      searchConfig =
         SearchConfig
-          { maxDepth = 100
-          , maxNumSteps = 400
+          { maxDepth = 10
+          , maxNumSteps = 200
           }
-      realAxioms = fwdAxioms ++ bwdAxioms
 
   allSubstitutions <- Set.toAscList <$> substitutions
-  let matchedCount =
-        length
-          [ ()
-          | substitution <- allSubstitutions
-          , substitutionMatches searchConfig realAxioms substitution
-          ]
-
+  let totalSubstitutions = length allSubstitutions
   putStrLn ("Search config: " ++ show searchConfig)
-  putStrLn ("Axioms loaded: " ++ show (length realAxioms))
-  putStrLn ("Unique substitutions loaded: " ++ show (length allSubstitutions))
-  putStrLn ("Matched substitutions: " ++ show matchedCount)
+  putStrLn ("Substitutions loaded: " ++ show (length allSubs))
+  putStrLn ("Unique substitutions loaded: " ++ show totalSubstitutions)
 
-substitutionMatches :: SearchConfig -> [Axiom] -> Substitution -> Bool
-substitutionMatches searchConfig axioms substitution =
-  any (`isomorphicGraphs` subDst substitution) (Set.toList reachableGraphs)
+  let results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
+      matchedCount = length (filter id results)
+
+  if verbose
+    then do
+      let indexed = zip3 [1 :: Int ..] allSubstitutions results
+      mapM_ (\(idx, sub, matched) ->
+        if not matched
+          then putStrLn ("MISSED #" ++ show idx ++ ":\n  src: " ++ renderSExpr (toSExpr (subSrc sub)) ++ "\n  dst: " ++ renderSExpr (toSExpr (subDst sub)))
+          else pure ()
+        ) indexed
+    else pure ()
+
+  putStrLn ("Matched substitutions: " ++ show matchedCount ++ " / " ++ show totalSubstitutions)
+
+substitutionMatches :: SearchConfig -> Substitution -> Bool
+substitutionMatches searchConfig substitution =
+  not (Set.null (Set.intersection srcReachable dstReachable))
   where
-    reachableGraphs = saturateUnderAxioms (subSrc substitution) axioms searchConfig
+    srcReachable = saturateUnderSubstitutions (subSrc substitution) allSubs searchConfig
+    dstReachable = saturateUnderSubstitutions (subDst substitution) allSubs searchConfig

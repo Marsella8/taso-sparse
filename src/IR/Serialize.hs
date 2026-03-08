@@ -157,8 +157,3 @@ instance SExprSerialize (BM.Bimap Var Var) where
 instance SExprSerialize Substitution where
   toSExpr (Substitution srcGraph dstGraph input varMap output) =
     list [atom "substitution", toSExpr srcGraph, toSExpr dstGraph, toSExpr input, toSExpr varMap, toSExpr output]
-
-write :: SExprSerialize a => FilePath -> [a] -> IO ()
-write path values = do
-  let content = unlines (map toSExprString values)
-  writeFile path content

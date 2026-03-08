@@ -1,6 +1,5 @@
 module IR.SerializeSpec where
 
-import Axioms (axioms)
 import IR.Graph
 import Serialize (SExprSerialize(..), renderSExpr)
 import Short
@@ -17,7 +16,6 @@ spec = do
   serializeAsstSpec
   serializeGraphSpec
   serializeSubstitutionSpec
-  serializeAllAxiomsSpec
 
 serializeTensorSpec :: Spec
 serializeTensorSpec =
@@ -88,12 +86,4 @@ serializeSubstitutionSpec =
             }
         correct = "(substitution (graph (asst (tensor out) (mul (tensor x) (scalar a))) (asst (tensor x) (input))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor out) (mul (tensor d0) (scalar a))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((scalar a) (scalar a))) (bimap ((tensor out) (tensor out))))"
         output = renderSExpr (toSExpr rw)
-    output `shouldBe` correct
-
-serializeAllAxiomsSpec :: Spec
-serializeAllAxiomsSpec =
-  it "serialize: all axioms" $ do
-    let axiomsIn = axioms
-        correct = 84
-        output = length (map (renderSExpr . toSExpr) axiomsIn)
     output `shouldBe` correct

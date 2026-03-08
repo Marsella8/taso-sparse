@@ -5,9 +5,9 @@ import qualified Data.Set as Set
 import IR.Graph (mustGraph)
 import IR.IR
 import Short
-import Substitutions.Apply (applyAxiom, applyMatchedAxiom)
+import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
-import Substitutions.Substitution (mustAxiom)
+import Substitutions.Substitution (mustSub)
 import Test.Hspec (Spec, it, shouldBe)
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
@@ -59,12 +59,208 @@ spec = do
   sourceInputAliasesInternalBindingPreservedSpec
   sourceInputAliasesInternalWithDstInternalsSpec
   sourceInputAliasesInternalSurvivingRefPreservedSpec
+  nonInjectiveInternalMatchProducesCorrectResultSpec
+  sourceInputMatchingNonInputTargetProducesCorrectResultSpec
+  deepSourceInputMatchingChainedTargetProducesCorrectResultSpec
+  rewriteWithSharedTargetNodeProducesCorrectSharingSpec
+  rewriteDoesNotInventBindingsSpec
+  contextRefsToOutputArePreservedAcrossRewriteSpec
+
+nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
+nonInjectiveInternalMatchProducesCorrectResultSpec =
+  it "soundness: non-injective internal match (shared target node) produces correct result" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (s0, relu x)
+            , (s1, relu x)
+            , (out, ewAdd s0 s1)
+            ]
+            [ (x, inp)
+            , (d0, transpose x)
+            , (out, ewAdd d0 d0)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (w, inp)
+            , (d0, relu w)
+            , (out, ewAdd d0 d0)
+            ]
+        match =
+          tensorMatchOf
+            [ (x, w)
+            , (s0, d0)
+            , (s1, d0)
+            , (out, out)
+            ]
+        correct =
+          Just $
+            mustGraph
+              [ (w, inp)
+              , (t "r0", transpose w)
+              , (out, ewAdd (t "r0") (t "r0"))
+              ]
+        output = applyMatchedSubstitution targetGraph axiom match
+    output `shouldBe` correct
+
+sourceInputMatchingNonInputTargetProducesCorrectResultSpec :: Spec
+sourceInputMatchingNonInputTargetProducesCorrectResultSpec =
+  it "soundness: source input matching a non-input target tensor preserves that binding" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (out, relu x)
+            ]
+            [ (x, inp)
+            , (out, transpose x)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (w, inp)
+            , (d0, transpose w)
+            , (out, relu d0)
+            ]
+        match =
+          tensorMatchOf
+            [ (x, d0)
+            , (out, out)
+            ]
+        correct =
+          Just $
+            mustGraph
+              [ (w, inp)
+              , (d0, transpose w)
+              , (out, transpose d0)
+              ]
+        output = applyMatchedSubstitution targetGraph axiom match
+    output `shouldBe` correct
+
+deepSourceInputMatchingChainedTargetProducesCorrectResultSpec :: Spec
+deepSourceInputMatchingChainedTargetProducesCorrectResultSpec =
+  it "soundness: source input matching deep in a target chain produces correct result" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (s0, relu x)
+            , (out, transpose s0)
+            ]
+            [ (x, inp)
+            , (out, relu x)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (w, inp)
+            , (d0, transpose w)
+            , (d1, relu d0)
+            , (out, transpose d1)
+            ]
+        match =
+          tensorMatchOf
+            [ (x, d0)
+            , (s0, d1)
+            , (out, out)
+            ]
+        correct =
+          Just $
+            mustGraph
+              [ (w, inp)
+              , (d0, transpose w)
+              , (out, relu d0)
+              ]
+        output = applyMatchedSubstitution targetGraph axiom match
+    output `shouldBe` correct
+
+rewriteWithSharedTargetNodeProducesCorrectSharingSpec :: Spec
+rewriteWithSharedTargetNodeProducesCorrectSharingSpec =
+  it "soundness: rewriting a subgraph that shares a node with the context is rejected when dangling" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (s0, relu x)
+            , (out, transpose s0)
+            ]
+            [ (x, inp)
+            , (out, transpose x)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (w, inp)
+            , (d0, relu w)
+            , (out, transpose d0)
+            , (z, ewAdd d0 w)
+            ]
+        match =
+          tensorMatchOf
+            [ (x, w)
+            , (s0, d0)
+            , (out, out)
+            ]
+        output = applyMatchedSubstitution targetGraph axiom match
+    output `shouldBe` Nothing
+
+rewriteDoesNotInventBindingsSpec :: Spec
+rewriteDoesNotInventBindingsSpec =
+  it "soundness: applySubstitution on a non-matching graph returns empty set" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (out, relu x)
+            ]
+            [ (x, inp)
+            , (out, transpose x)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (out, matMul x x)
+            ]
+        output = applySubstitution targetGraph axiom
+    output `shouldBe` Set.empty
+
+contextRefsToOutputArePreservedAcrossRewriteSpec :: Spec
+contextRefsToOutputArePreservedAcrossRewriteSpec =
+  it "soundness: context nodes referencing the matched output still work after rewrite" $ do
+    let axiom =
+          mustSub
+            [ (x, inp)
+            , (y, inp)
+            , (out, matMul x y)
+            ]
+            [ (x, inp)
+            , (y, inp)
+            , (out, ewAdd x y)
+            ]
+            (out, out)
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (out, matMul x y)
+            , (z, relu out)
+            , (w, transpose out)
+            ]
+        correct =
+          Set.singleton $
+            mustGraph
+              [ (x, inp)
+              , (y, inp)
+              , (out, ewAdd x y)
+              , (z, relu out)
+              , (w, transpose out)
+              ]
+        output = applySubstitution targetGraph axiom
+    output `shouldBe` correct
 
 identityInputRewriteLeavesGraphUnchangedSpec :: Spec
 identityInputRewriteLeavesGraphUnchangedSpec =
   it "apply: identity axiom on a single input leaves the graph unchanged" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [(x, inp)]
             [(x, inp)]
             (x, x)
@@ -78,14 +274,14 @@ identityInputRewriteLeavesGraphUnchangedSpec =
           Just $
             mustGraph
               [(x, inp)]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 identicalUnaryRewriteLeavesGraphUnchangedSpec :: Spec
 identicalUnaryRewriteLeavesGraphUnchangedSpec =
   it "apply: identical unary source and destination graphs leave the target unchanged" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, transpose x)
             ]
@@ -109,14 +305,14 @@ identicalUnaryRewriteLeavesGraphUnchangedSpec =
               [ (x, inp)
               , (out, transpose x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 identicalBinaryRewriteLeavesGraphUnchangedSpec :: Spec
 identicalBinaryRewriteLeavesGraphUnchangedSpec =
   it "apply: identical binary source and destination graphs leave the target unchanged" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, matMul x y)
@@ -145,14 +341,14 @@ identicalBinaryRewriteLeavesGraphUnchangedSpec =
               , (y, inp)
               , (out, matMul x y)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 simpleUnaryRewriteReplacesMatchedBindingSpec :: Spec
 simpleUnaryRewriteReplacesMatchedBindingSpec =
   it "apply: a simple unary rewrite replaces the matched binding" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -176,14 +372,14 @@ simpleUnaryRewriteReplacesMatchedBindingSpec =
               [ (x, inp)
               , (out, transpose x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 simpleUnaryRewritePreservesDownstreamUsersSpec :: Spec
 simpleUnaryRewritePreservesDownstreamUsersSpec =
   it "apply: rewriting a matched tensor preserves downstream users of that tensor" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -209,14 +405,14 @@ simpleUnaryRewritePreservesDownstreamUsersSpec =
               , (out, transpose x)
               , (z, matMul out x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 missingSourceInputBindingRejectedSpec :: Spec
 missingSourceInputBindingRejectedSpec =
   it "apply: missing a source input binding rejects the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -233,14 +429,14 @@ missingSourceInputBindingRejectedSpec =
           tensorMatchOf
             [(out, out)]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 missingSourceOutputBindingRejectedSpec :: Spec
 missingSourceOutputBindingRejectedSpec =
   it "apply: missing the source output binding rejects the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -257,14 +453,14 @@ missingSourceOutputBindingRejectedSpec =
           tensorMatchOf
             [(x, x)]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 missingSharedScalarBindingRejectedSpec :: Spec
 missingSharedScalarBindingRejectedSpec =
   it "apply: missing a shared scalar binding rejects the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -284,14 +480,14 @@ missingSharedScalarBindingRejectedSpec =
             ]
             []
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 extraTensorBindingRejectedSpec :: Spec
 extraTensorBindingRejectedSpec =
   it "apply: extra tensor bindings reject the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -311,14 +507,14 @@ extraTensorBindingRejectedSpec =
             , (z, x)
             ]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 extraTermBindingRejectedSpec :: Spec
 extraTermBindingRejectedSpec =
   it "apply: extra term bindings reject the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -338,14 +534,14 @@ extraTermBindingRejectedSpec =
             ]
             [(scalarVar "w", ScalarTm (scalarLit 2))]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 illSortedScalarBindingRejectedSpec :: Spec
 illSortedScalarBindingRejectedSpec =
   it "apply: ill-sorted term bindings reject the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -365,14 +561,14 @@ illSortedScalarBindingRejectedSpec =
             ]
             [(scalarVar "w", AxisTm axis0)]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 structurallyInvalidTensorMatchRejectedSpec :: Spec
 structurallyInvalidTensorMatchRejectedSpec =
-  it "apply: structurally invalid tensor matches are never enumerated by applyAxiom" $ do
+  it "apply: structurally invalid tensor matches are never enumerated by applySubstitution" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, matMul x y)
@@ -389,14 +585,14 @@ structurallyInvalidTensorMatchRejectedSpec =
             , (out, transpose x)
             ]
         correct = Set.empty
-        output = applyAxiom targetGraph axiom
+        output = applySubstitution targetGraph axiom
     output `shouldBe` correct
 
 structurallyInvalidTermMatchRejectedSpec :: Spec
 structurallyInvalidTermMatchRejectedSpec =
-  it "apply: structurally invalid term matches are never enumerated by applyAxiom" $ do
+  it "apply: structurally invalid term matches are never enumerated by applySubstitution" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, concatT axis0 x y)
@@ -413,14 +609,14 @@ structurallyInvalidTermMatchRejectedSpec =
             , (out, concatT axis1 x y)
             ]
         correct = Set.empty
-        output = applyAxiom targetGraph axiom
+        output = applySubstitution targetGraph axiom
     output `shouldBe` correct
 
 danglingInternalUseRejectedSpec :: Spec
 danglingInternalUseRejectedSpec =
   it "apply: rewriting is rejected when a surviving target binding still uses a deleted internal tensor" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (s0, relu x)
             , (out, transpose s0)
@@ -443,14 +639,14 @@ danglingInternalUseRejectedSpec =
             , (out, out)
             ]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 multipleDanglingUsesRejectedSpec :: Spec
 multipleDanglingUsesRejectedSpec =
   it "apply: multiple surviving users of a deleted internal tensor are also rejected" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (s0, relu x)
             , (out, transpose s0)
@@ -474,14 +670,14 @@ multipleDanglingUsesRejectedSpec =
             , (out, out)
             ]
         correct = Nothing
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 aliasedSourceInputsRewriteToSameTargetInputSpec :: Spec
 aliasedSourceInputsRewriteToSameTargetInputSpec =
   it "apply: distinct source inputs may both rewrite to the same target input tensor" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, matMul x y)
@@ -508,14 +704,14 @@ aliasedSourceInputsRewriteToSameTargetInputSpec =
               [ (w, inp)
               , (out, ewAdd w w)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 aliasedSourceInputsRewriteToSameConcreteTensorSpec :: Spec
 aliasedSourceInputsRewriteToSameConcreteTensorSpec =
   it "apply: distinct source inputs may both rewrite to the same concrete target tensor" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, matMul x y)
@@ -542,14 +738,14 @@ aliasedSourceInputsRewriteToSameConcreteTensorSpec =
               [ (s0, ConstImm)
               , (out, ewAdd s0 s0)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 distinctSourceInternalsMayAliasSameTargetInternalSpec :: Spec
 distinctSourceInternalsMayAliasSameTargetInternalSpec =
   it "apply: distinct source internals may alias the same target internal tensor" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (s0, matMul x y)
@@ -581,14 +777,14 @@ distinctSourceInternalsMayAliasSameTargetInternalSpec =
               [ (w, inp)
               , (out, matMul w w)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sourceInputMayAliasMatchedInternalTargetTensorSpec :: Spec
 sourceInputMayAliasMatchedInternalTargetTensorSpec =
   it "apply: a source input may rewrite to a matched target tensor that is itself internal" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -614,14 +810,14 @@ sourceInputMayAliasMatchedInternalTargetTensorSpec =
               , (d0, transpose w)
               , (out, transpose d0)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sourceInputAndMatchedInternalAliasingRejectsRewriteSpec :: Spec
 sourceInputAndMatchedInternalAliasingRejectsRewriteSpec =
   it "apply: source input aliasing a source internal rewrites correctly when the aliased binding is preserved" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (z, inp)
@@ -657,14 +853,14 @@ sourceInputAndMatchedInternalAliasingRejectsRewriteSpec =
               , (t "r0", matMul w w)
               , (out, ewAdd (t "r0") d0)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sharedScalarLiteralInstantiatedSpec :: Spec
 sharedScalarLiteralInstantiatedSpec =
   it "apply: shared scalar variables are instantiated with scalar literals in the destination" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -689,7 +885,7 @@ sharedScalarLiteralInstantiatedSpec =
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (scalarLit 2)))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 nestedScalarExpressionInstantiatedSpec :: Spec
@@ -700,7 +896,7 @@ nestedScalarExpressionInstantiatedSpec =
             (scalarLit 2)
             (ScalarMul (scalarLit 3) (scalarLit 4))
         axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -725,14 +921,14 @@ nestedScalarExpressionInstantiatedSpec =
               [ (x, inp)
               , (out, mul x (ScalarMul targetScalar (scalarLit 2)))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 repeatedDestinationScalarUsesInstantiateConsistentlySpec :: Spec
 repeatedDestinationScalarUsesInstantiateConsistentlySpec =
   it "apply: repeated destination uses of one scalar variable instantiate consistently" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -757,14 +953,14 @@ repeatedDestinationScalarUsesInstantiateConsistentlySpec =
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (scalarLit 3)))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 scalarInstantiationIsAtomicAcrossSwappedBindingsSpec :: Spec
 scalarInstantiationIsAtomicAcrossSwappedBindingsSpec =
   it "apply: scalar instantiation stays atomic when two scalar bindings swap names" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (ScalarMul (sc "u") (sc "v")))
             ]
@@ -791,14 +987,14 @@ scalarInstantiationIsAtomicAcrossSwappedBindingsSpec =
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 2) (sc "v")))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationOnlyScalarVariableRemainsAbstractSpec :: Spec
 destinationOnlyScalarVariableRemainsAbstractSpec =
   it "apply: scalar variables that exist only in the destination remain abstract" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -823,7 +1019,7 @@ destinationOnlyScalarVariableRemainsAbstractSpec =
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (sc "fresh")))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 deeplyNestedScalarExpressionInstantiatedSpec :: Spec
@@ -834,7 +1030,7 @@ deeplyNestedScalarExpressionInstantiatedSpec =
             (scalarLit 2)
             (ScalarMul (scalarLit 3) (scalarLit 4))
         axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, mul x (sc "w"))
             ]
@@ -859,14 +1055,14 @@ deeplyNestedScalarExpressionInstantiatedSpec =
               [ (x, inp)
               , (out, mul x (ScalarMul targetScalar (ScalarMul targetScalar (scalarLit 5))))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 axisLiteralInstantiatedSpec :: Spec
 axisLiteralInstantiatedSpec =
   it "apply: axis literals are instantiated through the destination graph" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, concatT a x y)
@@ -896,7 +1092,7 @@ axisLiteralInstantiatedSpec =
               , (y, inp)
               , (out, concatT axis0 y x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 axisVariableInstantiatedSpec :: Spec
@@ -904,7 +1100,7 @@ axisVariableInstantiatedSpec =
   it "apply: axis variables from the target graph are preserved when instantiating the destination" $ do
     let targetAxis = axis "b"
         axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, concatT a x y)
@@ -934,7 +1130,7 @@ axisVariableInstantiatedSpec =
               , (y, inp)
               , (out, concatT targetAxis y x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 convTermsInstantiateTogetherSpec :: Spec
@@ -943,7 +1139,7 @@ convTermsInstantiateTogetherSpec =
     let kernel = kernelLit 3 3
         stride = strideLit 2 1
         axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (out, conv2d k s p c x y)
@@ -977,14 +1173,14 @@ convTermsInstantiateTogetherSpec =
               , (y, inp)
               , (out, conv2d kernel stride padValid actRelu y x)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationInternalFreshenedEvenWithoutCollisionSpec :: Spec
 destinationInternalFreshenedEvenWithoutCollisionSpec =
   it "apply: destination internals are always freshened even when they do not collide" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1010,14 +1206,14 @@ destinationInternalFreshenedEvenWithoutCollisionSpec =
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationInternalCollisionWithExternalTargetTensorSpec :: Spec
 destinationInternalCollisionWithExternalTargetTensorSpec =
   it "apply: destination internals are freshened away from unrelated surviving target tensors" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1047,14 +1243,14 @@ destinationInternalCollisionWithExternalTargetTensorSpec =
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec :: Spec
 destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec =
   it "apply: rewired destination inputs are not captured by later internal freshening" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1082,14 +1278,14 @@ destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec =
               , (t "r0", transpose s0)
               , (out, relu (t "r0"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationMultipleInternalCollisionsSkipExistingRNamesSpec :: Spec
 destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
   it "apply: fresh destination names skip r-names that already exist in the surviving target graph" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1121,14 +1317,14 @@ destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
               , (t "r3", relu (t "r2"))
               , (out, matMul (t "r2") (t "r3"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec :: Spec
 destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec =
   it "apply: destination internals are renamed atomically when one internal shares the matched output name" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, relu x)
             ]
@@ -1156,14 +1352,14 @@ destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec =
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec :: Spec
 destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec =
   it "apply: destination internals that already look fresh are still renamed to newer fresh names" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1191,14 +1387,14 @@ destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec =
               , (t "r3", relu (t "r2"))
               , (out, matMul (t "r2") (t "r3"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 unrelatedDisconnectedTargetBindingsPreservedSpec :: Spec
 unrelatedDisconnectedTargetBindingsPreservedSpec =
   it "apply: unrelated disconnected target bindings are preserved across the rewrite" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -1226,14 +1422,14 @@ unrelatedDisconnectedTargetBindingsPreservedSpec =
               , (z, inp)
               , (w, transpose z)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sourceInputAliasesInternalBindingPreservedSpec :: Spec
 sourceInputAliasesInternalBindingPreservedSpec =
   it "apply: source input aliasing a source internal preserves the target binding" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (s0, relu x)
@@ -1264,14 +1460,14 @@ sourceInputAliasesInternalBindingPreservedSpec =
               , (d0, relu w)
               , (out, ewAdd w d0)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sourceInputAliasesInternalWithDstInternalsSpec :: Spec
 sourceInputAliasesInternalWithDstInternalsSpec =
   it "apply: source input aliasing a source internal works when the dst has fresh internals" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (s0, relu x)
@@ -1304,14 +1500,14 @@ sourceInputAliasesInternalWithDstInternalsSpec =
               , (t "r0", transpose d0)
               , (out, ewAdd w (t "r0"))
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 sourceInputAliasesInternalSurvivingRefPreservedSpec :: Spec
 sourceInputAliasesInternalSurvivingRefPreservedSpec =
   it "apply: source input aliasing a source internal preserves surviving downstream references" $ do
     let axiom =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (y, inp)
             , (s0, relu x)
@@ -1344,5 +1540,5 @@ sourceInputAliasesInternalSurvivingRefPreservedSpec =
               , (out, ewAdd w d0)
               , (z, transpose d0)
               ]
-        output = applyMatchedAxiom targetGraph axiom match
+        output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct

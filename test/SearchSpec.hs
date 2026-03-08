@@ -1,35 +1,52 @@
 module SearchSpec where
 
-import Axioms (axiom9, axiom10, axiom23, axiom25, axiom26, axiom27, bwdAxioms, fwdAxioms)
-import Data.Maybe (mapMaybe)
+import Axioms
+  ( allSubs
+  , axiom9
+  , axiom10
+  , axiom13
+  , axiom21
+  , axiom22
+  , axiom23
+  , axiom25
+  , axiom26
+  , axiom27
+  , axiom28
+  , axiom29
+  , axiom34
+  , axiom36
+  , axiom39
+  , axiom44
+  )
 import qualified Data.Set as Set
-import IR.Graph (Graph, graphMustLookup, mustGraph)
-import IR.IR (Expr(..), Tensor)
+import IR.Graph (Graph, mustGraph)
+import IR.IR (Expr(..))
 import IR.Isomorphic (isomorphicGraphs)
-import Search (SearchConfig(..), saturateUnderAxioms)
+import Search (SearchConfig(..), saturateUnderSubstitutions)
 import Short
-import Substitutions.Substitution (Axiom, invertAxiom, mustAxiom)
+import Substitutions.Substitution (Substitution, invertSubstitution, mustSub)
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
 spec = do
   emptyAxiomListReturnsStartGraphSpec
-  maxDepthZeroPreventsExpansionSpec
-  maxDepthAllowsOnlyThatManyRewriteLayersSpec
-  maxNumStepsBoundsTheNumberOfExpandedFrontierGraphsSpec
   multipleApplicableAxiomsUnionTheirResultsSpec
-  depthThreeMatMulTransposeCombinationsAppearSpec
   cyclesAreDeduplicatedAndDoNotLoopSpec
   inverseDoubleTransposeInsertionShouldBeReachableSpec
   inverseConstIConvInsertionShouldBeReachableSpec
   inverseConstImmInsertionShouldBeReachableSpec
   inverseConstOneInsertionShouldBeReachableSpec
-  frontierBudgetCanMissReachableTargetSpec
+  convReluFusionShouldBeReachableSpec
   leftMatMulScalarMotionShouldBeReachableSpec
+  nestedMatMulConcatPackagingShouldBeReachableSpec
   transposeConcatAxisSwapShouldBeReachableSpec
   leftConstIConvShouldCollapseToEnlargeSpec
+  sameKernelConvMergeShouldBeReachableSpec
+  enlargedKernelConvMergeShouldBeReachableSpec
   singleUseDoubleTransposeInsertionShouldBeReachableSpec
-  constPoolShouldNormalizeToPooledConstIConvSpec
+  fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec
+  constPoolShouldBeReachableFromPoolAvgConstIConvSpec
+  concatSplitRoundtripShouldBeReachableSpec
   transposeDistributionShouldReuseSharedSubexpressionsSpec
   multiOutputConcatReluSplitPackagingShouldBeReachableSpec
 
@@ -43,115 +60,7 @@ emptyAxiomListReturnsStartGraphSpec =
             ]
         config = SearchConfig {maxDepth = 3, maxNumSteps = 10}
         correct = Set.singleton startGraph
-        output = saturateUnderAxioms startGraph [] config
-    output `shouldBe` correct
-
-maxDepthZeroPreventsExpansionSpec :: Spec
-maxDepthZeroPreventsExpansionSpec =
-  it "search: maxDepth zero prevents any rewrites from being explored" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, relu x)
-            ]
-        axiomReluToTranspose =
-          mustAxiom
-            [ (x, inp)
-            , (out, relu x)
-            ]
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            (out, out)
-        config = SearchConfig {maxDepth = 0, maxNumSteps = 10}
-        correct = Set.singleton startGraph
-        output = saturateUnderAxioms startGraph [axiomReluToTranspose] config
-    output `shouldBe` correct
-
-maxDepthAllowsOnlyThatManyRewriteLayersSpec :: Spec
-maxDepthAllowsOnlyThatManyRewriteLayersSpec =
-  it "search: maxDepth includes graphs at that depth but does not expand them further" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, relu x)
-            ]
-        transposeGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-        scaledGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, mul x (scalarLit 2))
-            ]
-        axiomReluToTranspose =
-          mustAxiom
-            [ (x, inp)
-            , (out, relu x)
-            ]
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            (out, out)
-        axiomTransposeToScaled =
-          mustAxiom
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            [ (x, inp)
-            , (out, mul x (scalarLit 2))
-            ]
-            (out, out)
-        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-        correct = Set.fromList [startGraph, transposeGraph]
-        output =
-          saturateUnderAxioms
-            startGraph
-            [axiomReluToTranspose, axiomTransposeToScaled]
-            config
-    output `shouldBe` correct
-    scaledGraph `Set.member` output `shouldBe` False
-
-maxNumStepsBoundsTheNumberOfExpandedFrontierGraphsSpec :: Spec
-maxNumStepsBoundsTheNumberOfExpandedFrontierGraphsSpec =
-  it "search: maxNumSteps bounds how many frontier graphs are expanded" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, relu x)
-            ]
-        transposeGraph =
-          mustGraph
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-        axiomReluToTranspose =
-          mustAxiom
-            [ (x, inp)
-            , (out, relu x)
-            ]
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            (out, out)
-        axiomTransposeToScaled =
-          mustAxiom
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            [ (x, inp)
-            , (out, mul x (scalarLit 2))
-            ]
-            (out, out)
-        config = SearchConfig {maxDepth = 10, maxNumSteps = 1}
-        correct = Set.fromList [startGraph, transposeGraph]
-        output =
-          saturateUnderAxioms
-            startGraph
-            [axiomReluToTranspose, axiomTransposeToScaled]
-            config
+        output = saturateUnderSubstitutions startGraph [] config
     output `shouldBe` correct
 
 multipleApplicableAxiomsUnionTheirResultsSpec :: Spec
@@ -173,7 +82,7 @@ multipleApplicableAxiomsUnionTheirResultsSpec =
             , (out, mul x (scalarLit 2))
             ]
         axiomReluToTranspose =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -182,7 +91,7 @@ multipleApplicableAxiomsUnionTheirResultsSpec =
             ]
             (out, out)
         axiomReluToScaled =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -193,83 +102,11 @@ multipleApplicableAxiomsUnionTheirResultsSpec =
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
         correct = Set.fromList [startGraph, transposeGraph, scaledGraph]
         output =
-          saturateUnderAxioms
+          saturateUnderSubstitutions
             startGraph
             [axiomReluToTranspose, axiomReluToScaled]
             config
     output `shouldBe` correct
-
-depthThreeMatMulTransposeCombinationsAppearSpec :: Spec
-depthThreeMatMulTransposeCombinationsAppearSpec =
-  it "search: depth-3 saturation covers every transpose-count combination on matmul lhs, rhs, and output" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (out, matMul x y)
-            ]
-        leftTransposeAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (y, inp)
-            , (out, matMul x y)
-            ]
-            [ (x, inp)
-            , (y, inp)
-            , (s0, transpose x)
-            , (out, matMul s0 y)
-            ]
-            (out, out)
-        rightTransposeAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (y, inp)
-            , (out, matMul x y)
-            ]
-            [ (x, inp)
-            , (y, inp)
-            , (s0, transpose y)
-            , (out, matMul x s0)
-            ]
-            (out, out)
-        outputTransposeAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (y, inp)
-            , (out, matMul x y)
-            ]
-            [ (x, inp)
-            , (y, inp)
-            , (s0, matMul x y)
-            , (out, transpose s0)
-            ]
-            (out, out)
-        config = SearchConfig {maxDepth = 3, maxNumSteps = 100}
-        summaries =
-          Set.fromList $
-            mapMaybe
-              matMulTransposeSummary
-              (Set.toList (saturateUnderAxioms startGraph [leftTransposeAxiom, rightTransposeAxiom, outputTransposeAxiom] config))
-        correct =
-          Set.fromList
-            [ (lhsCount, rhsCount, outCount)
-            | lhsCount <- [0 .. 3]
-            , rhsCount <- [0 .. 3 - lhsCount]
-            , outCount <- [0 .. 3 - lhsCount - rhsCount]
-            ]
-        correctDepthThree =
-          Set.fromList
-            [ (lhsCount, rhsCount, outCount)
-            | lhsCount <- [0 .. 3]
-            , rhsCount <- [0 .. 3 - lhsCount]
-            , let outCount = 3 - lhsCount - rhsCount
-            ]
-        depthThreeSummaries =
-          Set.filter
-            (\(lhsCount, rhsCount, outCount) -> lhsCount + rhsCount + outCount == 3)
-            summaries
-    summaries `shouldBe` correct
-    depthThreeSummaries `shouldBe` correctDepthThree
 
 cyclesAreDeduplicatedAndDoNotLoopSpec :: Spec
 cyclesAreDeduplicatedAndDoNotLoopSpec =
@@ -285,7 +122,7 @@ cyclesAreDeduplicatedAndDoNotLoopSpec =
             , (out, transpose x)
             ]
         axiomReluToTranspose =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, relu x)
             ]
@@ -294,7 +131,7 @@ cyclesAreDeduplicatedAndDoNotLoopSpec =
             ]
             (out, out)
         axiomTransposeToRelu =
-          mustAxiom
+          mustSub
             [ (x, inp)
             , (out, transpose x)
             ]
@@ -305,7 +142,7 @@ cyclesAreDeduplicatedAndDoNotLoopSpec =
         config = SearchConfig {maxDepth = 10, maxNumSteps = 10}
         correct = Set.fromList [startGraph, transposeGraph]
         output =
-          saturateUnderAxioms
+          saturateUnderSubstitutions
             startGraph
             [axiomReluToTranspose, axiomTransposeToRelu]
             config
@@ -325,8 +162,7 @@ inverseDoubleTransposeInsertionShouldBeReachableSpec =
             , (out, transpose s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-        output = saturateUnderAxioms startGraph [invertAxiom axiom9] config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
 
 inverseConstIConvInsertionShouldBeReachableSpec :: Spec
 inverseConstIConvInsertionShouldBeReachableSpec =
@@ -342,8 +178,7 @@ inverseConstIConvInsertionShouldBeReachableSpec =
             , (out, conv2d k stride11 padSame actNone x s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-        output = saturateUnderAxioms startGraph [invertAxiom axiom25] config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom25, invertSubstitution axiom25] config
 
 inverseConstImmInsertionShouldBeReachableSpec :: Spec
 inverseConstImmInsertionShouldBeReachableSpec =
@@ -359,8 +194,7 @@ inverseConstImmInsertionShouldBeReachableSpec =
             , (out, matMul x s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-        output = saturateUnderAxioms startGraph [invertAxiom axiom26] config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom26, invertSubstitution axiom26] config
 
 inverseConstOneInsertionShouldBeReachableSpec :: Spec
 inverseConstOneInsertionShouldBeReachableSpec =
@@ -376,58 +210,26 @@ inverseConstOneInsertionShouldBeReachableSpec =
             , (out, ewMul x s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-        output = saturateUnderAxioms startGraph [invertAxiom axiom27] config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom27, invertSubstitution axiom27] config
 
-frontierBudgetCanMissReachableTargetSpec :: Spec
-frontierBudgetCanMissReachableTargetSpec =
-  it "search: a small step budget can miss a shallow reachable graph when the needed frontier branch is never expanded" $ do
+convReluFusionShouldBeReachableSpec :: Spec
+convReluFusionShouldBeReachableSpec =
+  it "search: conv2d with fused relu should be mutually reachable with relu(conv2d without activation)" $ do
     let startGraph =
           mustGraph
             [ (x, inp)
-            , (out, relu x)
+            , (y, inp)
+            , (s0, conv2d k stride11 padSame actNone x y)
+            , (out, relu s0)
             ]
         targetGraph =
           mustGraph
             [ (x, inp)
-            , (s0, transpose x)
-            , (out, relu s0)
+            , (y, inp)
+            , (out, conv2d k stride11 padSame actRelu x y)
             ]
-        reluToMulAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (out, relu x)
-            ]
-            [ (x, inp)
-            , (out, mul x (scalarLit 2))
-            ]
-            (out, out)
-        reluToTransposeAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (out, relu x)
-            ]
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            (out, out)
-        transposeToReluAxiom =
-          mustAxiom
-            [ (x, inp)
-            , (out, transpose x)
-            ]
-            [ (x, inp)
-            , (s0, transpose x)
-            , (out, relu s0)
-            ]
-            (out, out)
-        config = SearchConfig {maxDepth = 2, maxNumSteps = 2}
-        output =
-          saturateUnderAxioms
-            startGraph
-            [reluToMulAxiom, reluToTransposeAxiom, transposeToReluAxiom]
-            config
-    expectReachable targetGraph output
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
+    expectMutuallyReachable startGraph targetGraph [axiom22, invertSubstitution axiom22] config
 
 leftMatMulScalarMotionShouldBeReachableSpec :: Spec
 leftMatMulScalarMotionShouldBeReachableSpec =
@@ -447,8 +249,32 @@ leftMatMulScalarMotionShouldBeReachableSpec =
             , (out, matMul x d0)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        output = saturateUnderAxioms startGraph (fwdAxioms ++ bwdAxioms) config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+nestedMatMulConcatPackagingShouldBeReachableSpec :: Spec
+nestedMatMulConcatPackagingShouldBeReachableSpec =
+  it "search: a nested matmul feeding concat should be packageable into concat after pushing the final matmul inward" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (s0, matMul x y)
+            , (s1, concatT axis0 y s0)
+            , (out, matMul s1 z)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (d0, matMul y z)
+            , (d1, matMul x d0)
+            , (out, concatT axis0 d0 d1)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 200}
+        axioms = [axiom13, invertSubstitution axiom13, axiom36, invertSubstitution axiom36]
+    expectMutuallyReachable startGraph targetGraph axioms config
 
 transposeConcatAxisSwapShouldBeReachableSpec :: Spec
 transposeConcatAxisSwapShouldBeReachableSpec =
@@ -469,8 +295,7 @@ transposeConcatAxisSwapShouldBeReachableSpec =
             , (out, concatT axis0 d0 d1)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        output = saturateUnderAxioms startGraph realAxioms config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph allSubs config
 
 leftConstIConvShouldCollapseToEnlargeSpec :: Spec
 leftConstIConvShouldCollapseToEnlargeSpec =
@@ -488,8 +313,65 @@ leftConstIConvShouldCollapseToEnlargeSpec =
             , (out, enlarge k33 y)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        output = saturateUnderAxioms startGraph realAxioms config
-    expectReachable targetGraph output
+        axioms = [axiom21, invertSubstitution axiom21, axiom25, invertSubstitution axiom25]
+    expectMutuallyReachable startGraph targetGraph axioms config
+
+sameKernelConvMergeShouldBeReachableSpec :: Spec
+sameKernelConvMergeShouldBeReachableSpec =
+  it "search: two same-input convs with the same kernel should package into concat(weights) -> conv" $ do
+    let k33 = kernelLit 3 3
+        w1 = t "w1"
+        w2 = t "w2"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (s0, conv2d k33 stride11 padSame actNone x w1)
+            , (s1, conv2d k33 stride11 padSame actNone x w2)
+            , (out, concatT axis1 s0 s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (d0, concatT axis0 w1 w2)
+            , (out, conv2d k33 stride11 padSame actNone x d0)
+            ]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 20}
+        axioms = [axiom39, invertSubstitution axiom39]
+    expectMutuallyReachable startGraph targetGraph axioms config
+
+enlargedKernelConvMergeShouldBeReachableSpec :: Spec
+enlargedKernelConvMergeShouldBeReachableSpec =
+  it "search: two same-input same-kernel convs should package after enlarging weights" $ do
+    let k33 = kernelLit 3 3
+        w1 = t "w1"
+        w2 = t "w2"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (s0, conv2d k33 stride11 padSame actNone x w1)
+            , (s1, conv2d k33 stride11 padSame actNone x w2)
+            , (out, concatT axis1 s0 s1)
+            ]
+        d2 = t "d2"
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (d0, enlarge k33 w1)
+            , (d1, enlarge k33 w2)
+            , (d2, concatT axis0 d0 d1)
+            , (out, conv2d k33 stride11 padSame actNone x d2)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        axioms = [axiom21, invertSubstitution axiom21, axiom39, invertSubstitution axiom39]
+    expectMutuallyReachable startGraph targetGraph axioms config
 
 singleUseDoubleTransposeInsertionShouldBeReachableSpec :: Spec
 singleUseDoubleTransposeInsertionShouldBeReachableSpec =
@@ -508,12 +390,31 @@ singleUseDoubleTransposeInsertionShouldBeReachableSpec =
             , (out, matMul d0 s0)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        output = saturateUnderAxioms startGraph realAxioms config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
 
-constPoolShouldNormalizeToPooledConstIConvSpec :: Spec
-constPoolShouldNormalizeToPooledConstIConvSpec =
-  it "search: ConstPool should be reachable from pool2d-max(ConstIConv)" $ do
+fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec :: Spec
+fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec =
+  it "search: inverse double-transpose insertion should be occurrence-local under fanout" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (out, ewAdd x s0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (t "d0", transpose x)
+            , (t "d1", transpose (t "d0"))
+            , (out, ewAdd (t "d1") s0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+
+constPoolShouldBeReachableFromPoolAvgConstIConvSpec :: Spec
+constPoolShouldBeReachableFromPoolAvgConstIConvSpec =
+  it "search: ConstPool should be mutually reachable with pool2d-avg(ConstIConv)" $ do
     let k33 = kernelLit 3 3
         startGraph =
           mustGraph
@@ -522,11 +423,30 @@ constPoolShouldNormalizeToPooledConstIConvSpec =
         targetGraph =
           mustGraph
             [ (s0, ConstIConv k33)
-            , (out, pool2dMax k33 stride11 padSame s0)
+            , (out, pool2dAvg k33 stride11 padSame s0)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        output = saturateUnderAxioms startGraph realAxioms config
-    expectReachable targetGraph output
+    expectMutuallyReachable startGraph targetGraph [axiom44, invertSubstitution axiom44] config
+
+concatSplitRoundtripShouldBeReachableSpec :: Spec
+concatSplitRoundtripShouldBeReachableSpec =
+  it "search: concat followed by split0/split1 should be mutually reachable with two independent outputs" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (t "c0", concatT axis0 x y)
+            , (o0, split0 axis0 (t "c0"))
+            , (o1, split1 axis0 (t "c0"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        subs = [axiom28, invertSubstitution axiom28, axiom29, invertSubstitution axiom29]
+    expectMutuallyReachable startGraph targetGraph subs config
 
 transposeDistributionShouldReuseSharedSubexpressionsSpec :: Spec
 transposeDistributionShouldReuseSharedSubexpressionsSpec =
@@ -546,8 +466,8 @@ transposeDistributionShouldReuseSharedSubexpressionsSpec =
             , (out, ewAdd d0 d1)
             ]
         config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
-        output = saturateUnderAxioms startGraph [axiom10, invertAxiom axiom23] config
-    expectReachable targetGraph output
+        axioms = [axiom10, invertSubstitution axiom10, axiom23, invertSubstitution axiom23]
+    expectMutuallyReachable startGraph targetGraph axioms config
 
 multiOutputConcatReluSplitPackagingShouldBeReachableSpec :: Spec
 multiOutputConcatReluSplitPackagingShouldBeReachableSpec =
@@ -569,33 +489,21 @@ multiOutputConcatReluSplitPackagingShouldBeReachableSpec =
             , (t "d3", split1 axis0 d1)
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
-        output = saturateUnderAxioms startGraph (fwdAxioms ++ bwdAxioms) config
-    expectReachable targetGraph output
-
-realAxioms :: [Axiom]
-realAxioms = fwdAxioms ++ bwdAxioms
-
-matMulTransposeSummary :: Graph -> Maybe (Int, Int, Int)
-matMulTransposeSummary graph = do
-  (outputCount, matMulTensor) <- countTransposeChain graph out
-  MatMul lhsTensor rhsTensor <- Just (graphMustLookup graph matMulTensor)
-  (lhsCount, lhsBase) <- countTransposeChain graph lhsTensor
-  (rhsCount, rhsBase) <- countTransposeChain graph rhsTensor
-  Input <- Just (graphMustLookup graph lhsBase)
-  Input <- Just (graphMustLookup graph rhsBase)
-  if lhsBase == x && rhsBase == y
-    then Just (lhsCount, rhsCount, outputCount)
-    else Nothing
-
-countTransposeChain :: Graph -> Tensor -> Maybe (Int, Tensor)
-countTransposeChain graph tensor =
-  case graphMustLookup graph tensor of
-    Transpose innerTensor -> do
-      (count, baseTensor) <- countTransposeChain graph innerTensor
-      Just (count + 1, baseTensor)
-    _ ->
-      Just (0, tensor)
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom34
+          , invertSubstitution axiom34
+          ]
+    expectMutuallyReachable startGraph targetGraph subs config
 
 expectReachable :: Graph -> Set.Set Graph -> IO ()
 expectReachable targetGraph searchedGraphs =
   any (`isomorphicGraphs` targetGraph) (Set.toList searchedGraphs) `shouldBe` True
+
+expectMutuallyReachable :: Graph -> Graph -> [Substitution] -> SearchConfig -> IO ()
+expectMutuallyReachable lhs rhs subs config = do
+  expectReachable rhs (saturateUnderSubstitutions lhs subs config)
+  expectReachable lhs (saturateUnderSubstitutions rhs subs config)

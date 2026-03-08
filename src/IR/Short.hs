@@ -35,6 +35,15 @@ d0 = t "d0"
 d1 :: Tensor
 d1 = t "d1"
 
+o0 :: Tensor
+o0 = t "o0"
+
+o1 :: Tensor
+o1 = t "o1"
+
+o2 :: Tensor
+o2 = t "o2"
+
 s :: Stride2DTerm
 s = Stride2DTermVar (Stride2DVariable "s")
 

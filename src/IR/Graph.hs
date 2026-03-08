@@ -2,17 +2,21 @@ module IR.Graph
   ( Graph(..)
   , mkGraph
   , mustGraph
-  , graphDisjointUnion
+  , graphDisjointUnionMany
   , graphBindings
   , graphTensorVars
   , graphExprs
+  , graphRefs
   , graphInputs
   , graphOutputs
   , graphInternals
   , graphMustLookup
+  , graphWithoutKeys
+  , graphRestrictKeys
+  , graphRename
   , varsInGraph
-  , atomicGraphRename
   , instantiateGraphTerms
+  , canonicalizeGraph
   ) where
 
 import Control.Monad (guard)
@@ -43,12 +47,15 @@ mustGraph bindings =
     Just g -> g
     Nothing -> error "Invalid graph"
 
-graphDisjointUnion :: Graph -> Graph -> Maybe Graph
-graphDisjointUnion (Graph lhs) (Graph rhs)
-  | Set.null (Map.keysSet lhs `Set.intersection` Map.keysSet rhs) =
-      mkGraph (Map.toList lhs ++ Map.toList rhs)
+graphDisjointUnionMany :: [Graph] -> Maybe Graph
+graphDisjointUnionMany graphs
+  | sum (map Map.size maps) == Map.size merged =
+      mkGraph (Map.toList merged)
   | otherwise =
       Nothing
+  where
+    maps = [m | Graph m <- graphs]
+    merged = Map.unions maps
 
 graphBindings :: Graph -> [(Tensor, Expr)]
 graphBindings (Graph m) = Map.toList m
@@ -58,6 +65,9 @@ graphTensorVars (Graph m) = Map.keysSet m
 
 graphExprs :: Graph -> Set Expr
 graphExprs (Graph m) = Set.fromList (Map.elems m)
+
+graphRefs :: Graph -> Set Tensor
+graphRefs g = Set.unions (Set.map tensorsInExpr (graphExprs g))
 
 graphInputs :: Graph -> Set Tensor
 graphInputs g = Set.fromList [t | (t, Input) <- graphBindings g]
@@ -76,22 +86,26 @@ graphInternals g =
 graphMustLookup :: Graph -> Tensor -> Expr
 graphMustLookup (Graph m) t = fromJust (Map.lookup t m)
 
+graphWithoutKeys :: Set Tensor -> Graph -> Graph
+graphWithoutKeys tensors (Graph m) = Graph (Map.withoutKeys m tensors)
+
+graphRestrictKeys :: Set Tensor -> Graph -> Graph
+graphRestrictKeys tensors (Graph m) = Graph (Map.restrictKeys m tensors)
+
 varsInGraph :: Graph -> Set Var
 varsInGraph g =
   Set.unions (Set.map varsInExpr (graphExprs g))
 
-removeDef :: Graph -> Tensor -> Graph
-removeDef (Graph m) t = Graph (Map.delete t m)
-
-atomicGraphRename :: Graph -> Map.Map Tensor Tensor -> Graph
-atomicGraphRename graph renameMap
-  | Set.isSubsetOf (Map.keysSet renameMap) (graphTensorVars graph) = mustGraph renamedBindings
-  | otherwise = error "Invalid rename map"
+graphRename :: Map.Map Tensor Tensor -> Graph -> Graph
+graphRename renameMap (Graph originalMap)
+  | Map.size renamedMap == Map.size originalMap = Graph renamedMap
+  | otherwise = error "Invalid tensor rename map"
   where
     renamedBindings =
       [ (atomicRenameTensor renameMap tensor, atomicExprRename renameMap expr)
-      | (tensor, expr) <- graphBindings graph
+      | (tensor, expr) <- Map.toList originalMap
       ]
+    renamedMap = Map.fromList renamedBindings
 
 instantiateGraphTerms :: Graph -> Map.Map Var Term -> Graph
 instantiateGraphTerms graph@(Graph g) instantiateMap =
@@ -99,3 +113,40 @@ instantiateGraphTerms graph@(Graph g) instantiateMap =
       && all (\(src, dst) -> varSort src == termSort dst) (Map.toList instantiateMap)
     then Graph (Map.map (instantiateExprTerms instantiateMap) g)
     else error "Invalid term instantiation map"
+
+canonicalizeGraph :: Graph -> Graph
+canonicalizeGraph g =
+  graphRename renameMap g
+  where
+    outputs = Set.toAscList (graphOutputs g)
+    (_, renameMap) = foldl visitTensor (0 :: Int, Map.empty) outputs
+    visitTensor (counter, rmap) tensor
+      | Map.member tensor rmap = (counter, rmap)
+      | otherwise =
+          let canonical = Tensor ("c" ++ show counter)
+              rmap' = Map.insert tensor canonical rmap
+              expr = graphMustLookup g tensor
+              refs = tensorsInExprList expr
+          in foldl visitTensor (counter + 1, rmap') refs
+
+tensorsInExprList :: Expr -> [Tensor]
+tensorsInExprList expr =
+  case expr of
+    Input -> []
+    Conv2D _ _ _ _ a b -> [a, b]
+    Pool2DAvg _ _ _ a -> [a]
+    Pool2DMax _ _ _ a -> [a]
+    Relu a -> [a]
+    MatMul a b -> [a, b]
+    EwAdd a b -> [a, b]
+    EwMul a b -> [a, b]
+    Mul a _ -> [a]
+    Transpose a -> [a]
+    Concat _ a b -> [a, b]
+    Split0 _ a -> [a]
+    Split1 _ a -> [a]
+    Enlarge _ a -> [a]
+    ConstPool _ -> []
+    ConstIConv _ -> []
+    ConstImm -> []
+    ConstOne -> []

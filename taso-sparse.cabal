@@ -41,12 +41,15 @@ library
 executable taso-sparse
     import:           warnings
     main-is:          Main.hs
+    ghc-options:      -threaded -rtsopts "-with-rtsopts=-N"
     -- other-modules:
     -- other-extensions:
     build-depends:
         base ^>=4.18.3.0,
         bimap ^>=0.5.0,
         containers ^>=0.6.7,
+        parallel ^>=3.2,
+        terminal-progress-bar ^>=0.4.2,
         taso-sparse
 
     hs-source-dirs:   app
@@ -58,9 +61,6 @@ test-suite taso-sparse-test
     build-tool-depends:
         hspec-discover:hspec-discover
     other-modules:
-        -- EventuallyDelete.RewriteSpec
-        -- EventuallyDelete.SearchSpec
-        -- EventuallyDelete.SubstitutionSpec
         IR.CodecSpec
         IR.DeserializeSpec
         IR.GraphSpec

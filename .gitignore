@@ -1,3 +1,5 @@
 dist-newstyle/
 __pycache__/
 *.pdf
+*.o
+*.hi
