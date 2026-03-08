@@ -6,43 +6,23 @@ import Axioms (allSubs)
 import Control.Parallel.Strategies (parMap, rseq)
 import qualified Data.Set as Set
 import Search (SearchConfig(..), saturateUnderSubstitutions)
-import Serialize (SExprSerialize(..), renderSExpr)
-import System.Environment (getArgs)
-import System.IO (BufferMode(LineBuffering), hSetBuffering, stdout)
 import Substitutions.Substitution (Substitution(..))
 import TASO (substitutions)
 
 main :: IO ()
 main = do
-  hSetBuffering stdout LineBuffering
-  args <- getArgs
-  let verbose = "--missed" `elem` args
-      searchConfig =
+  let searchConfig =
         SearchConfig
-          { maxDepth = 10
-          , maxNumSteps = 200
+          { maxDepth = 2
+          , maxNumSteps = 100
           }
 
   allSubstitutions <- Set.toAscList <$> substitutions
-  let totalSubstitutions = length allSubstitutions
-  putStrLn ("Search config: " ++ show searchConfig)
-  putStrLn ("Substitutions loaded: " ++ show (length allSubs))
-  putStrLn ("Unique substitutions loaded: " ++ show totalSubstitutions)
+  let total = length allSubstitutions
+      results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
+      !matched = length (filter id results)
 
-  let results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
-      matchedCount = length (filter id results)
-
-  if verbose
-    then do
-      let indexed = zip3 [1 :: Int ..] allSubstitutions results
-      mapM_ (\(idx, sub, matched) ->
-        if not matched
-          then putStrLn ("MISSED #" ++ show idx ++ ":\n  src: " ++ renderSExpr (toSExpr (subSrc sub)) ++ "\n  dst: " ++ renderSExpr (toSExpr (subDst sub)))
-          else pure ()
-        ) indexed
-    else pure ()
-
-  putStrLn ("Matched substitutions: " ++ show matchedCount ++ " / " ++ show totalSubstitutions)
+  putStrLn ("Matched: " ++ show matched ++ " / " ++ show total)
 
 substitutionMatches :: SearchConfig -> Substitution -> Bool
 substitutionMatches searchConfig substitution =

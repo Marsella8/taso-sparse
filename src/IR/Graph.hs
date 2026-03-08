@@ -96,10 +96,10 @@ varsInGraph :: Graph -> Set Var
 varsInGraph g =
   Set.unions (Set.map varsInExpr (graphExprs g))
 
-graphRename :: Map.Map Tensor Tensor -> Graph -> Graph
+graphRename :: Map.Map Tensor Tensor -> Graph -> Maybe Graph
 graphRename renameMap (Graph originalMap)
-  | Map.size renamedMap == Map.size originalMap = Graph renamedMap
-  | otherwise = error "Invalid tensor rename map"
+  | Map.size renamedMap == Map.size originalMap = Just (Graph renamedMap)
+  | otherwise = Nothing
   where
     renamedBindings =
       [ (atomicRenameTensor renameMap tensor, atomicExprRename renameMap expr)
@@ -116,10 +116,13 @@ instantiateGraphTerms graph@(Graph g) instantiateMap =
 
 canonicalizeGraph :: Graph -> Graph
 canonicalizeGraph g =
-  graphRename renameMap g
+  case graphRename renameMap (graphRestrictKeys reachable g) of
+    Just g' -> g'
+    Nothing -> error "canonicalizeGraph: internal error"
   where
     outputs = Set.toAscList (graphOutputs g)
     (_, renameMap) = foldl visitTensor (0 :: Int, Map.empty) outputs
+    reachable = Map.keysSet renameMap
     visitTensor (counter, rmap) tensor
       | Map.member tensor rmap = (counter, rmap)
       | otherwise =

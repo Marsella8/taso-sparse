@@ -7,7 +7,8 @@ import IR.IR
 import Short
 import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
-import Substitutions.Substitution (mustSub)
+import Axioms (axiom28, axiom29)
+import Substitutions.Substitution (mustSub, invertSubstitution)
 import Test.Hspec (Spec, it, shouldBe)
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
@@ -65,6 +66,132 @@ spec = do
   rewriteWithSharedTargetNodeProducesCorrectSharingSpec
   rewriteDoesNotInventBindingsSpec
   contextRefsToOutputArePreservedAcrossRewriteSpec
+  split0ConcatReducesToFirstArgSpec
+  split1ConcatReducesToSecondArgSpec
+  split0ConcatWithDownstreamUsersSpec
+  inverseSplit0IntroducesConcatSplitSpec
+  split0ConcatViaApplySubstitutionSpec
+  inverseAxiom28SoundnessSpec
+
+split0ConcatReducesToFirstArgSpec :: Spec
+split0ConcatReducesToFirstArgSpec =
+  it "apply: split0(concat(x,y)) reduces to x (y becomes dead)" $ do
+    let targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT axis0 x y)
+            , (out, split0 axis0 s0)
+            ]
+        match =
+          matchOf
+            [ (x, x)
+            , (y, y)
+            , (s0, s0)
+            , (out, out)
+            ]
+            [(axisVar "a", AxisTm axis0)]
+        correct =
+          Just $
+            mustGraph
+              [ (x, inp)
+              , (y, inp)
+              ]
+        output = applyMatchedSubstitution targetGraph axiom28 match
+    output `shouldBe` correct
+
+split1ConcatReducesToSecondArgSpec :: Spec
+split1ConcatReducesToSecondArgSpec =
+  it "apply: split1(concat(x,y)) reduces to y (x becomes dead)" $ do
+    let targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT axis1 x y)
+            , (out, split1 axis1 s0)
+            ]
+        match =
+          matchOf
+            [ (x, x)
+            , (y, y)
+            , (s0, s0)
+            , (out, out)
+            ]
+            [(axisVar "a", AxisTm axis1)]
+        correct =
+          Just $
+            mustGraph
+              [ (x, inp)
+              , (y, inp)
+              ]
+        output = applyMatchedSubstitution targetGraph axiom29 match
+    output `shouldBe` correct
+
+split0ConcatWithDownstreamUsersSpec :: Spec
+split0ConcatWithDownstreamUsersSpec =
+  it "apply: split0(concat(x,y)) with downstream users redirects output to x (y becomes dead)" $ do
+    let targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT axis0 x y)
+            , (out, split0 axis0 s0)
+            , (z, relu out)
+            ]
+        match =
+          matchOf
+            [ (x, x)
+            , (y, y)
+            , (s0, s0)
+            , (out, out)
+            ]
+            [(axisVar "a", AxisTm axis0)]
+        correct =
+          Just $
+            mustGraph
+              [ (x, inp)
+              , (y, inp)
+              , (z, relu x)
+              ]
+        output = applyMatchedSubstitution targetGraph axiom28 match
+    output `shouldBe` correct
+
+inverseSplit0IntroducesConcatSplitSpec :: Spec
+inverseSplit0IntroducesConcatSplitSpec =
+  it "apply: inverse of axiom28 wraps two inputs in concat+split0" $ do
+    let inv28 = invertSubstitution axiom28
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            ]
+        output = applySubstitution targetGraph inv28
+    (Set.size output > 0) `shouldBe` True
+
+split0ConcatViaApplySubstitutionSpec :: Spec
+split0ConcatViaApplySubstitutionSpec =
+  it "apply: applySubstitution finds and applies axiom28 on a matching graph" $ do
+    let targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT axis0 x y)
+            , (out, split0 axis0 s0)
+            ]
+        output = applySubstitution targetGraph axiom28
+    Set.size output `shouldBe` 1
+
+inverseAxiom28SoundnessSpec :: Spec
+inverseAxiom28SoundnessSpec =
+  it "soundness: inverse axiom28 should not match when target has fewer outputs than source" $ do
+    let inv28 = invertSubstitution axiom28
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, relu x)
+            ]
+        results = applySubstitution targetGraph inv28
+    Set.size results `shouldBe` 0
 
 nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
 nonInjectiveInternalMatchProducesCorrectResultSpec =

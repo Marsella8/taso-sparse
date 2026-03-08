@@ -33,8 +33,8 @@ fwdSubs =
   , axiom25
   , axiom26
   , axiom27
-  -- , axiom28
-  -- , axiom29
+  , axiom28
+  , axiom29
   , axiom30
   , axiom31
   , axiom32

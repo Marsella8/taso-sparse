@@ -73,8 +73,14 @@ mkSubstitution srcBindings dstBindings inputPairs varPairs outputPairs = do
   guard (bimapSrc varMap `Set.isSubsetOf` varsInGraph srcGraph)
   guard (bimapDst varMap `Set.isSubsetOf` varsInGraph dstGraph)
   guard (all (\(srcVar, dstVar) -> varSort srcVar == varSort dstVar) (Bi.toList varMap))
-  guard (bimapSrc outMap == graphOutputs srcGraph)
-  guard (bimapDst outMap == graphOutputs dstGraph)
+  guard (bimapSrc outMap `Set.isSubsetOf` graphOutputs srcGraph)
+  let unmappedSrcOuts = graphOutputs srcGraph Set.\\ bimapSrc outMap
+  guard (unmappedSrcOuts `Set.isSubsetOf` graphInputs srcGraph)
+  guard (all (`Bi.member` inMap) (Set.toList unmappedSrcOuts))
+  guard (bimapDst outMap `Set.isSubsetOf` graphOutputs dstGraph)
+  let unmappedDstOuts = graphOutputs dstGraph Set.\\ bimapDst outMap
+  guard (unmappedDstOuts `Set.isSubsetOf` graphInputs dstGraph)
+  guard (all (`Bi.memberR` inMap) (Set.toList unmappedDstOuts))
   pure (Substitution srcGraph dstGraph inMap varMap outMap)
 
 -- Convenience: single-output substitution where inputs share names

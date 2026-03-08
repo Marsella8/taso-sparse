@@ -53,17 +53,26 @@ matchSubstitution sub targetGraph =
   where
     srcGraph = subSrc sub
     srcOuts = Set.toAscList (graphOutputs srcGraph)
+    targetOuts = Set.toList (graphOutputs targetGraph)
     targetAll = Set.toList (graphTensorVars targetGraph)
+    multiOutput = length srcOuts > 1
 
     isValidMatch match =
       matchIsWellSorted match &&
-      matchIsComplete srcGraph match
+      matchIsComplete srcGraph match &&
+      outputsInjective match
+
+    outputsInjective match =
+      let mappedOuts = map (\so -> matchTensorMap match Map.! so) srcOuts
+      in length mappedOuts == Set.size (Set.fromList mappedOuts)
 
     allMatches = Set.fromList $
       foldl' expandWithOutput [emptyMatch] srcOuts
 
+    candidates = if multiOutput then targetOuts else targetAll
+
     expandWithOutput partials srcOut =
-      concatMap (\m -> mapMaybe (\tgt -> matchTensors srcGraph targetGraph srcOut tgt m) targetAll) partials
+      concatMap (\m -> mapMaybe (\tgt -> matchTensors srcGraph targetGraph srcOut tgt m) candidates) partials
 
 matchTensors :: Graph -> Graph -> Tensor -> Tensor -> Match -> Maybe Match
 matchTensors srcGraph targetGraph srcTensor targetTensor partialMatch = do

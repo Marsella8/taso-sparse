@@ -59,9 +59,13 @@ emptyAxiomListReturnsStartGraphSpec =
             , (out, relu x)
             ]
         config = SearchConfig {maxDepth = 3, maxNumSteps = 10}
-        correct = Set.singleton startGraph
+        correct = startGraph
         output = saturateUnderSubstitutions startGraph [] config
-    output `shouldBe` correct
+        outputGraphs = Set.toList output
+    length outputGraphs `shouldBe` 1
+    case outputGraphs of
+      [g] -> isomorphicGraphs g correct `shouldBe` True
+      _ -> pure ()
 
 multipleApplicableAxiomsUnionTheirResultsSpec :: Spec
 multipleApplicableAxiomsUnionTheirResultsSpec =
@@ -106,7 +110,7 @@ multipleApplicableAxiomsUnionTheirResultsSpec =
             startGraph
             [axiomReluToTranspose, axiomReluToScaled]
             config
-    output `shouldBe` correct
+    expectSameGraphSets output correct
 
 cyclesAreDeduplicatedAndDoNotLoopSpec :: Spec
 cyclesAreDeduplicatedAndDoNotLoopSpec =
@@ -146,7 +150,7 @@ cyclesAreDeduplicatedAndDoNotLoopSpec =
             startGraph
             [axiomReluToTranspose, axiomTransposeToRelu]
             config
-    output `shouldBe` correct
+    expectSameGraphSets output correct
 
 inverseDoubleTransposeInsertionShouldBeReachableSpec :: Spec
 inverseDoubleTransposeInsertionShouldBeReachableSpec =
@@ -502,6 +506,12 @@ multiOutputConcatReluSplitPackagingShouldBeReachableSpec =
 expectReachable :: Graph -> Set.Set Graph -> IO ()
 expectReachable targetGraph searchedGraphs =
   any (`isomorphicGraphs` targetGraph) (Set.toList searchedGraphs) `shouldBe` True
+
+expectSameGraphSets :: Set.Set Graph -> Set.Set Graph -> IO ()
+expectSameGraphSets actual expected = do
+  Set.size actual `shouldBe` Set.size expected
+  mapM_ (`expectReachable` actual) (Set.toList expected)
+  mapM_ (`expectReachable` expected) (Set.toList actual)
 
 expectMutuallyReachable :: Graph -> Graph -> [Substitution] -> SearchConfig -> IO ()
 expectMutuallyReachable lhs rhs subs config = do
