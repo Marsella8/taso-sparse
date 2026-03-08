@@ -5,6 +5,7 @@ import Axioms
   , axiom9
   , axiom10
   , axiom13
+  , axiom15
   , axiom21
   , axiom22
   , axiom23
@@ -14,13 +15,14 @@ import Axioms
   , axiom28
   , axiom29
   , axiom34
+  , axiom38
   , axiom36
   , axiom39
   , axiom44
   )
 import qualified Data.Set as Set
 import IR.Graph (Graph, mustGraph)
-import IR.IR (Expr(..))
+import IR.IR (Expr(..), Kernel2DTerm(..), Kernel2DVariable(..))
 import IR.Isomorphic (isomorphicGraphs)
 import Search (SearchConfig(..), saturateUnderSubstitutions)
 import Short
@@ -38,17 +40,29 @@ spec = do
   inverseConstOneInsertionShouldBeReachableSpec
   convReluFusionShouldBeReachableSpec
   leftMatMulScalarMotionShouldBeReachableSpec
-  nestedMatMulConcatPackagingShouldBeReachableSpec
-  transposeConcatAxisSwapShouldBeReachableSpec
-  leftConstIConvShouldCollapseToEnlargeSpec
   sameKernelConvMergeShouldBeReachableSpec
-  enlargedKernelConvMergeShouldBeReachableSpec
-  singleUseDoubleTransposeInsertionShouldBeReachableSpec
-  fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec
-  constPoolShouldBeReachableFromPoolAvgConstIConvSpec
+  singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec
+  singleConvKernelEnlargementShouldBeReachableSpec
+  singleSplit0PackagingShouldBeReachableSpec
+  split0ThenSplit1PackagingShouldBeReachableSpec
   concatSplitRoundtripShouldBeReachableSpec
+  multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec
+  multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec
+  convInputBatchingShouldBeReachableSpec
+  singleUseDoubleTransposeInsertionShouldBeReachableSpec
+  distributeThroughSharedAddNodeShouldBeOccurrenceLocalSpec
+  factorTwoMatMulsWithSharedLeftInputWhileOneBranchIsStillUsedSpec
+  cseAfterInsertingSameStructureTwiceSpec
+  batchTwoConvsIntoOneConvWhenOneOriginalResultIsStillUsedSpec
+  convChainWithOuterReluShouldBeReachableSpec
+  convChainWithReluFusedIntoSecondConvShouldBeReachableSpec
+  convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec
+  convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec
+  convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec
+  convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec
+  convBatchingAcrossBothAxesShouldBeReachableSpec
+  constPoolShouldBeReachableFromPoolAvgConstIConvSpec
   transposeDistributionShouldReuseSharedSubexpressionsSpec
-  multiOutputConcatReluSplitPackagingShouldBeReachableSpec
 
 emptyAxiomListReturnsStartGraphSpec :: Spec
 emptyAxiomListReturnsStartGraphSpec =
@@ -276,7 +290,7 @@ nestedMatMulConcatPackagingShouldBeReachableSpec =
             , (d1, matMul x d0)
             , (out, concatT axis0 d0 d1)
             ]
-        config = SearchConfig {maxDepth = 5, maxNumSteps = 200}
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 1000}
         axioms = [axiom13, invertSubstitution axiom13, axiom36, invertSubstitution axiom36]
     expectMutuallyReachable startGraph targetGraph axioms config
 
@@ -298,7 +312,7 @@ transposeConcatAxisSwapShouldBeReachableSpec =
             , (d1, transpose y)
             , (out, concatT axis0 d0 d1)
             ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
     expectMutuallyReachable startGraph targetGraph allSubs config
 
 leftConstIConvShouldCollapseToEnlargeSpec :: Spec
@@ -316,7 +330,7 @@ leftConstIConvShouldCollapseToEnlargeSpec =
             [ (y, inp)
             , (out, enlarge k33 y)
             ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
         axioms = [axiom21, invertSubstitution axiom21, axiom25, invertSubstitution axiom25]
     expectMutuallyReachable startGraph targetGraph axioms config
 
@@ -347,6 +361,201 @@ sameKernelConvMergeShouldBeReachableSpec =
         axioms = [axiom39, invertSubstitution axiom39]
     expectMutuallyReachable startGraph targetGraph axioms config
 
+singleConvKernelEnlargementShouldBeReachableSpec :: Spec
+singleConvKernelEnlargementShouldBeReachableSpec =
+  it "search: a single conv should reach a concrete enlarged kernel when the source kernel is concrete" $ do
+    let k13 = kernelLit 1 3
+        k33 = kernelLit 3 3
+        w0 = t "w0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (out, conv2d k13 stride11 padSame actNone x w0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (d0, enlarge k33 w0)
+            , (out, conv2d k33 stride11 padSame actNone x d0)
+            ]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
+        axioms = [axiom21]
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
+singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec :: Spec
+singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec =
+  it "search: a single conv should keep an abstract destination kernel when the source kernel is abstract" $ do
+    let k1' = Kernel2DTermVar (Kernel2DVariable "k1")
+        w0 = t "w0"
+        k2' = Kernel2DTermVar (Kernel2DVariable "k2")
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (out, conv2d k1' stride11 padSame actNone x w0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (d0, enlarge k2' w0)
+            , (out, conv2d k2' stride11 padSame actNone x d0)
+            ]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
+        axioms = [axiom21]
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
+singleSplit0PackagingShouldBeReachableSpec :: Spec
+singleSplit0PackagingShouldBeReachableSpec =
+  it "search: two inputs should be packageable into concat(axis0) -> split0" $ do
+    let targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            ]
+        startGraph =
+          mustGraph
+            [ (t "r0", inp)
+            , (t "r1", inp)
+            , (t "r2", concatT axis0 (t "r0") (t "r1"))
+            , (x, split0 axis0 (t "r2"))
+            ]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
+        subs = [invertSubstitution axiom28]
+    expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
+
+split0ThenSplit1PackagingShouldBeReachableSpec :: Spec
+split0ThenSplit1PackagingShouldBeReachableSpec =
+  it "search: after introducing split0, introducing split1 on the same concat should be reachable" $ do
+    let startGraph =
+          mustGraph
+            [ (t "r0", inp)
+            , (t "r1", inp)
+            , (t "r2", concatT a (t "r0") (t "r1"))
+            , (x, split0 a (t "r2"))
+            ]
+        targetGraph =
+          mustGraph
+            [ (t "r0", inp)
+            , (t "r1", inp)
+            , (t "r2", concatT a (t "r0") (t "r1"))
+            , (x, split0 a (t "r2"))
+            , (y, split1 a (t "r2"))
+            ]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
+        subs = [invertSubstitution axiom29]
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+concatSplitRoundtripShouldBeReachableSpec :: Spec
+concatSplitRoundtripShouldBeReachableSpec =
+  it "search: concat followed by split0/split1 should be mutually reachable with two independent outputs" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (t "c0", concatT axis0 x y)
+            , (o0, split0 axis0 (t "c0"))
+            , (o1, split1 axis0 (t "c0"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        subs = [axiom28, invertSubstitution axiom28, axiom29, invertSubstitution axiom29]
+    expectMutuallyReachable startGraph targetGraph subs config
+
+multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec :: Spec
+multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec =
+  it "search: two relu outputs should reach concat -> relu -> split" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, relu x)
+            , (s1, relu y)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT axis0 x y)
+            , (d1, relu d0)
+            , (t "d2", split0 axis0 d1)
+            , (t "d3", split1 axis0 d1)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom34
+          , invertSubstitution axiom34
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec :: Spec
+multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec =
+  it "search: concat -> relu -> split should reduce back to two relu outputs" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, relu x)
+            , (s1, relu y)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT axis0 x y)
+            , (d1, relu d0)
+            , (t "d2", split0 axis0 d1)
+            , (t "d3", split1 axis0 d1)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom34
+          , invertSubstitution axiom34
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
+
+convInputBatchingShouldBeReachableSpec :: Spec
+convInputBatchingShouldBeReachableSpec =
+  it "search: two same-weight convs should package into concat(inputs) -> conv" $ do
+    let k13 = kernelLit 1 3
+        w0 = t "w0"
+        x1 = t "x1"
+        x2 = t "x2"
+        startGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (s0, conv2d k13 stride11 padSame actNone x1 w0)
+            , (s1, conv2d k13 stride11 padSame actNone x2 w0)
+            , (out, concatT axis0 s0 s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (d0, concatT axis0 x1 x2)
+            , (out, conv2d k13 stride11 padSame actNone d0 w0)
+            ]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 20}
+        axioms = [axiom38, invertSubstitution axiom38]
+    expectMutuallyReachable startGraph targetGraph axioms config
+
 enlargedKernelConvMergeShouldBeReachableSpec :: Spec
 enlargedKernelConvMergeShouldBeReachableSpec =
   it "search: two same-input same-kernel convs should package after enlarging weights" $ do
@@ -373,7 +582,7 @@ enlargedKernelConvMergeShouldBeReachableSpec =
             , (d2, concatT axis0 d0 d1)
             , (out, conv2d k33 stride11 padSame actNone x d2)
             ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
         axioms = [axiom21, invertSubstitution axiom21, axiom39, invertSubstitution axiom39]
     expectMutuallyReachable startGraph targetGraph axioms config
 
@@ -393,7 +602,7 @@ singleUseDoubleTransposeInsertionShouldBeReachableSpec =
             , (d0, transpose s0)
             , (out, matMul d0 s0)
             ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
     expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
 
 fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec :: Spec
@@ -413,8 +622,353 @@ fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec =
             , (t "d1", transpose (t "d0"))
             , (out, ewAdd (t "d1") s0)
             ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+
+distributeThroughSharedAddNodeShouldBeOccurrenceLocalSpec :: Spec
+distributeThroughSharedAddNodeShouldBeOccurrenceLocalSpec =
+  it "search: distributing through a shared add node should leave the external add user intact" $ do
+    let a0 = t "a0"
+        u0 = t "u0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (a0, ewAdd y z)
+            , (out, matMul x a0)
+            , (u0, relu a0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (a0, ewAdd y z)
+            , (d0, matMul x y)
+            , (d1, matMul x z)
+            , (out, ewAdd d0 d1)
+            , (u0, relu a0)
+            ]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
+    expectMutuallyReachable startGraph targetGraph [axiom15, invertSubstitution axiom15] config
+
+factorTwoMatMulsWithSharedLeftInputWhileOneBranchIsStillUsedSpec :: Spec
+factorTwoMatMulsWithSharedLeftInputWhileOneBranchIsStillUsedSpec =
+  it "search: factoring two matmuls should preserve an external user of one branch" $ do
+    let m0 = t "m0"
+        m1 = t "m1"
+        a0 = t "a0"
+        u0 = t "u0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (m0, matMul x y)
+            , (m1, matMul x z)
+            , (out, ewAdd m0 m1)
+            , (u0, relu m0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (m0, matMul x y)
+            , (a0, ewAdd y z)
+            , (out, matMul x a0)
+            , (u0, relu m0)
+            ]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
+    expectMutuallyReachable startGraph targetGraph [axiom15, invertSubstitution axiom15] config
+
+cseAfterInsertingSameStructureTwiceSpec :: Spec
+cseAfterInsertingSameStructureTwiceSpec =
+  it "search: inserting the same structure twice should collapse back to one shared node" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (out, ewAdd x x)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, transpose s0)
+            , (out, ewAdd d0 d0)
+            ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
     expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+
+batchTwoConvsIntoOneConvWhenOneOriginalResultIsStillUsedSpec :: Spec
+batchTwoConvsIntoOneConvWhenOneOriginalResultIsStillUsedSpec =
+  it "search: batching two convs should preserve an external user of the first conv result" $ do
+    let k33 = kernelLit 3 3
+        w1 = t "w1"
+        w2 = t "w2"
+        c0 = t "c0"
+        c1 = t "c1"
+        u0 = t "u0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (c0, conv2d k33 stride11 padSame actNone x w1)
+            , (c1, conv2d k33 stride11 padSame actNone x w2)
+            , (out, concatT axis1 c0 c1)
+            , (u0, relu c0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (c0, conv2d k33 stride11 padSame actNone x w1)
+            , (d0, concatT axis0 w1 w2)
+            , (out, conv2d k33 stride11 padSame actNone x d0)
+            , (u0, relu c0)
+            ]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
+    expectMutuallyReachable startGraph targetGraph [axiom39, invertSubstitution axiom39] config
+
+convChainWithOuterReluShouldBeReachableSpec :: Spec
+convChainWithOuterReluShouldBeReachableSpec =
+  it "search: conv chain with enlarged kernels should be reachable while preserving the outer relu" $ do
+    let k13 = kernelLit 1 3
+        k33 = kernelLit 3 3
+        w0 = t "w0"
+        d2 = t "d2"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (s0, conv2d k13 stride11 padSame actNone x w0)
+            , (s1, conv2d k13 stride11 padSame actNone s0 w0)
+            , (out, relu s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (d0, enlarge k33 w0)
+            , (d1, conv2d k33 stride11 padSame actNone x d0)
+            , (d2, conv2d k33 stride11 padSame actNone d1 d0)
+            , (out, relu d2)
+            ]
+        subs = [axiom21, invertSubstitution axiom21, axiom22, invertSubstitution axiom22]
+        config = SearchConfig {maxDepth = 10, maxNumSteps = 100}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+convChainWithReluFusedIntoSecondConvShouldBeReachableSpec :: Spec
+convChainWithReluFusedIntoSecondConvShouldBeReachableSpec =
+  it "search: conv chain with enlarged kernels should be reachable with relu fused into the second conv" $ do
+    let k13 = kernelLit 1 3
+        k33 = kernelLit 3 3
+        w0 = t "w0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (s0, conv2d k13 stride11 padSame actNone x w0)
+            , (s1, conv2d k13 stride11 padSame actNone s0 w0)
+            , (out, relu s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w0, inp)
+            , (d0, enlarge k33 w0)
+            , (d1, conv2d k33 stride11 padSame actNone x d0)
+            , (out, conv2d k33 stride11 padSame actRelu d1 d0)
+            ]
+        subs = [axiom21, invertSubstitution axiom21, axiom22, invertSubstitution axiom22]
+        config = SearchConfig {maxDepth = 10, maxNumSteps = 100}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec :: Spec
+convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec =
+  it "search: batching convs over weights should reach split outputs" $ do
+    let w1 = t "w1"
+        w2 = t "w2"
+        c0 = t "c0"
+        c1 = t "c1"
+        packed = t "packed"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x w1)
+            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x w2)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (packed, concatT axis0 w1 w2)
+            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone x packed)
+            , (c0, split0 axis1 d0)
+            , (c1, split1 axis1 d0)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom39
+          , invertSubstitution axiom39
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec :: Spec
+convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec =
+  it "search: split outputs over weight batching should reduce back to two convs" $ do
+    let w1 = t "w1"
+        w2 = t "w2"
+        c0 = t "c0"
+        c1 = t "c1"
+        packed = t "packed"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x w1)
+            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x w2)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (packed, concatT axis0 w1 w2)
+            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone x packed)
+            , (c0, split0 axis1 d0)
+            , (c1, split1 axis1 d0)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom39
+          , invertSubstitution axiom39
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
+
+convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec :: Spec
+convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec =
+  it "search: batching convs over inputs should reach split outputs" $ do
+    let x1 = t "x1"
+        x2 = t "x2"
+        w0 = t "w0"
+        c0 = t "c0"
+        c1 = t "c1"
+        packed = t "packed"
+        startGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x1 w0)
+            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x2 w0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (packed, concatT axis0 x1 x2)
+            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone packed w0)
+            , (c0, split0 axis0 d0)
+            , (c1, split1 axis0 d0)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom38
+          , invertSubstitution axiom38
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
+
+convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec :: Spec
+convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec =
+  it "search: split outputs over input batching should reduce back to two convs" $ do
+    let x1 = t "x1"
+        x2 = t "x2"
+        w0 = t "w0"
+        c0 = t "c0"
+        c1 = t "c1"
+        packed = t "packed"
+        startGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x1 w0)
+            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x2 w0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w0, inp)
+            , (packed, concatT axis0 x1 x2)
+            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone packed w0)
+            , (c0, split0 axis0 d0)
+            , (c1, split1 axis0 d0)
+            ]
+        subs =
+          [ axiom28
+          , invertSubstitution axiom28
+          , axiom29
+          , invertSubstitution axiom29
+          , axiom38
+          , invertSubstitution axiom38
+          ]
+        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
+    expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
+
+convBatchingAcrossBothAxesShouldBeReachableSpec :: Spec
+convBatchingAcrossBothAxesShouldBeReachableSpec =
+  it "search: batching convs across both inputs and weights should be reachable" $ do
+    let x1 = t "x1"
+        x2 = t "x2"
+        w1 = t "w1"
+        w2 = t "w2"
+        c0 = t "c0"
+        c1 = t "c1"
+        startGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x1 w1)
+            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x2 w2)
+            , (out, concatT axis1 c0 c1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x1, inp)
+            , (x2, inp)
+            , (w1, inp)
+            , (w2, inp)
+            , (d0, concatT axis0 w1 w2)
+            , (d1, concatT axis1 x1 x2)
+            , (out, conv2d (kernelLit 1 3) stride11 padSame actNone d1 d0)
+            ]
+        subs = [axiom39, invertSubstitution axiom39]
+        config = SearchConfig {maxDepth = 10, maxNumSteps = 100}
+    expectMutuallyReachable startGraph targetGraph subs config
 
 constPoolShouldBeReachableFromPoolAvgConstIConvSpec :: Spec
 constPoolShouldBeReachableFromPoolAvgConstIConvSpec =
@@ -431,26 +985,6 @@ constPoolShouldBeReachableFromPoolAvgConstIConvSpec =
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
     expectMutuallyReachable startGraph targetGraph [axiom44, invertSubstitution axiom44] config
-
-concatSplitRoundtripShouldBeReachableSpec :: Spec
-concatSplitRoundtripShouldBeReachableSpec =
-  it "search: concat followed by split0/split1 should be mutually reachable with two independent outputs" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (t "c0", concatT axis0 x y)
-            , (o0, split0 axis0 (t "c0"))
-            , (o1, split1 axis0 (t "c0"))
-            ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        subs = [axiom28, invertSubstitution axiom28, axiom29, invertSubstitution axiom29]
-    expectMutuallyReachable startGraph targetGraph subs config
 
 transposeDistributionShouldReuseSharedSubexpressionsSpec :: Spec
 transposeDistributionShouldReuseSharedSubexpressionsSpec =
@@ -473,15 +1007,17 @@ transposeDistributionShouldReuseSharedSubexpressionsSpec =
         axioms = [axiom10, invertSubstitution axiom10, axiom23, invertSubstitution axiom23]
     expectMutuallyReachable startGraph targetGraph axioms config
 
-multiOutputConcatReluSplitPackagingShouldBeReachableSpec :: Spec
-multiOutputConcatReluSplitPackagingShouldBeReachableSpec =
-  it "search: two relu outputs should be packageable into concat -> relu -> split" $ do
-    let startGraph =
+multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec :: Spec
+multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec =
+  it "search: concat -> relu -> split packaging should preserve a downstream use of the first relu branch" $ do
+    let u0 = t "u0"
+        startGraph =
           mustGraph
             [ (x, inp)
             , (y, inp)
             , (s0, relu x)
             , (s1, relu y)
+            , (u0, ewAdd s0 s0)
             ]
         targetGraph =
           mustGraph
@@ -489,10 +1025,11 @@ multiOutputConcatReluSplitPackagingShouldBeReachableSpec =
             , (y, inp)
             , (d0, concatT axis0 x y)
             , (d1, relu d0)
-            , (t "d2", split0 axis0 d1)
-            , (t "d3", split1 axis0 d1)
+            , (o0, split0 axis0 d1)
+            , (o1, split1 axis0 d1)
+            , (u0, ewAdd o0 o0)
             ]
-        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 3000}
         subs =
           [ axiom28
           , invertSubstitution axiom28
