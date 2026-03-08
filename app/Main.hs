@@ -13,7 +13,7 @@ main :: IO ()
 main = do
   let searchConfig =
         SearchConfig
-          { maxDepth = 2
+          { maxDepth = 10
           , maxNumSteps = 100
           }
 
