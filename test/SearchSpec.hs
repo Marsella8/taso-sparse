@@ -5,6 +5,7 @@ import Axioms
   , axiom9
   , axiom10
   , axiom13
+  , axiom16
   , axiom21
   , axiom22
   , axiom23
@@ -16,7 +17,9 @@ import Axioms
   , axiom34
   , axiom36
   , axiom39
-  , axiom44
+  , axiom44a
+  , axiom44b
+  , lemmaTransposeConstImm
   )
 import qualified Data.Set as Set
 import IR.Graph (Graph, mustGraph)
@@ -35,6 +38,8 @@ spec = do
   inverseDoubleTransposeInsertionShouldBeReachableSpec
   inverseConstIConvInsertionShouldBeReachableSpec
   inverseConstImmInsertionShouldBeReachableSpec
+  transposeConstImmShouldCollapseToConstImmSpec
+  leftConstImmShouldCollapseToInputSpec
   inverseConstOneInsertionShouldBeReachableSpec
   convReluFusionShouldBeReachableSpec
   leftMatMulScalarMotionShouldBeReachableSpec
@@ -46,6 +51,7 @@ spec = do
   singleUseDoubleTransposeInsertionShouldBeReachableSpec
   fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec
   constPoolShouldBeReachableFromPoolAvgConstIConvSpec
+  constPoolShouldBeReachableFromPoolMaxConstIConvSpec
   concatSplitRoundtripShouldBeReachableSpec
   transposeDistributionShouldReuseSharedSubexpressionsSpec
   multiOutputConcatReluSplitPackagingShouldBeReachableSpec
@@ -200,6 +206,45 @@ inverseConstImmInsertionShouldBeReachableSpec =
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
     expectMutuallyReachable startGraph targetGraph [axiom26, invertSubstitution axiom26] config
 
+transposeConstImmShouldCollapseToConstImmSpec :: Spec
+transposeConstImmShouldCollapseToConstImmSpec =
+  it "search: transpose(ConstImm) should be reducible to ConstImm" $ do
+    let startGraph =
+          mustGraph
+            [ (s0, ConstImm)
+            , (out, transpose s0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (out, ConstImm)
+            ]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
+        axioms = [lemmaTransposeConstImm, invertSubstitution lemmaTransposeConstImm]
+    expectMutuallyReachable startGraph targetGraph axioms config
+
+leftConstImmShouldCollapseToInputSpec :: Spec
+leftConstImmShouldCollapseToInputSpec =
+  it "search: matmul(ConstImm, x) should be reducible to x" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, ConstImm)
+            , (out, matMul s0 x)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            ]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 100}
+        axioms =
+          [ lemmaTransposeConstImm
+          , axiom9
+          , invertSubstitution axiom9
+          , invertSubstitution axiom16
+          , axiom26
+          ]
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
 inverseConstOneInsertionShouldBeReachableSpec :: Spec
 inverseConstOneInsertionShouldBeReachableSpec =
   it "search: inverse ConstOne insertion should make ewmul(x, ConstOne) reachable from x" $ do
@@ -349,8 +394,9 @@ sameKernelConvMergeShouldBeReachableSpec =
 
 enlargedKernelConvMergeShouldBeReachableSpec :: Spec
 enlargedKernelConvMergeShouldBeReachableSpec =
-  it "search: two same-input same-kernel convs should package after enlarging weights" $ do
-    let k33 = kernelLit 3 3
+  it "search: two same-input 1x3 convs should package after enlarging weights to 3x3" $ do
+    let k13 = kernelLit 1 3
+        k33 = kernelLit 3 3
         w1 = t "w1"
         w2 = t "w2"
         startGraph =
@@ -358,8 +404,8 @@ enlargedKernelConvMergeShouldBeReachableSpec =
             [ (x, inp)
             , (w1, inp)
             , (w2, inp)
-            , (s0, conv2d k33 stride11 padSame actNone x w1)
-            , (s1, conv2d k33 stride11 padSame actNone x w2)
+            , (s0, conv2d k13 stride11 padSame actNone x w1)
+            , (s1, conv2d k13 stride11 padSame actNone x w2)
             , (out, concatT axis1 s0 s1)
             ]
         d2 = t "d2"
@@ -430,7 +476,23 @@ constPoolShouldBeReachableFromPoolAvgConstIConvSpec =
             , (out, pool2dAvg k33 stride11 padSame s0)
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-    expectMutuallyReachable startGraph targetGraph [axiom44, invertSubstitution axiom44] config
+    expectMutuallyReachable startGraph targetGraph [axiom44a, invertSubstitution axiom44a] config
+
+constPoolShouldBeReachableFromPoolMaxConstIConvSpec :: Spec
+constPoolShouldBeReachableFromPoolMaxConstIConvSpec =
+  it "search: ConstPool should be mutually reachable with pool2d-max(ConstIConv)" $ do
+    let k33 = kernelLit 3 3
+        startGraph =
+          mustGraph
+            [ (out, ConstPool k33)
+            ]
+        targetGraph =
+          mustGraph
+            [ (s0, ConstIConv k33)
+            , (out, pool2dMax k33 stride11 padSame s0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
+    expectMutuallyReachable startGraph targetGraph [axiom44b, invertSubstitution axiom44b] config
 
 concatSplitRoundtripShouldBeReachableSpec :: Spec
 concatSplitRoundtripShouldBeReachableSpec =

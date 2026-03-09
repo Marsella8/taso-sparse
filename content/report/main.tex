@@ -56,7 +56,14 @@ We then recursively match accoring to the following rules. For a given pair of n
 - If neither is input, then they must be the same expression: we then recurively match on their subexpressions.
 (We propagate a partial state as we go along).
 
+
+However, we still have that... To address this, we perform common subexpression elimination after each rewrite.
+
 \subsection{Proof Search}
+
+One of the main motivations for enforcing a bidireactioanl rewrite system, was, in addition to completeness, the follows:
+A nice property of a fully bidirectional rewrite system is that if we have an intermediate state s for which we have sound derivations src*->s and dst*->s, then we can invert the dst->s derivation and then chain it to obtain a sound src*->dst derivation (and viceversa).
+GIevn that we are doing combinanorial searhc, this makes the search significnatly faster. Suppose that src and dst are a minium of n rewirets apart, and that each state can be rewritten to x new states (and assue, for simplifty, that these strates had not been visited before). Then, to reach dst from src, we would need to visit at least x^n states (assuming BFS). With the bidirectional approach, we can however intitiate the search from both src and dst, and thus visit at most x^(n/2) states. (We explore until we discover a commomn state.)
 
 \section{Methodology and Results}
 TODO
@@ -64,7 +71,42 @@ TODO
 \section{Discussion, Limitations, and Next Steps}
 TODO
 
+
+
+\subssection
+
+Case study: Tranpose(X) -> X
+
+Surprisignly, this test was initially failing. Turns out, that under the current axioms, the derivation was more complicated than intially anticipated:
+TO prove, we neede the following axioms:
+matmul(x, I) -> X
+matmul(x.T, y.T) -> matmul(y,x)
+matmul(...)
+
+transpose(I)                                  start
+matmul(transpose(I), I)                       [invertSubstitution axiom26]
+matmul(transpose(I), transpose(transpose(I))) [invertSubstitution axiom9]
+transpose(matmul(transpose(I), I))            [invertSubstitution axiom16]
+transpose(transpose(I))                       [axiom26]
+I                                             [axiom9]
+
+Analogously, we have for matmul(I, x) -> x:
+
+matmul(I, x)                                        start
+matmul(transpose(transpose(I)), x)                  [invertSubstitution axiom9]
+matmul(transpose(transpose(I)), transpose(transpose(x))) [invertSubstitution axiom9]
+transpose(matmul(transpose(x), transpose(I)))       [invertSubstitution axiom16]
+transpose(matmul(transpose(x), I))                  [transpose(I) -> I]
+transpose(transpose(x))                             [axiom26]
+x                                                   [axiom9]
+
+(note that it uses transpose(I) -> I as an axiom, making even the shortest proof several rewrites long).
+
+Surprisignly, the TASO team converged on the same problem, and added Tranpose(X) -> X as a lemma. We adopt the same solution.
+(To say that this is not a weakness of rewrites vs proof system, like distance in rewrite space and in proof space are comparable).
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{refs}
 
 \end{document}
+
+--TODO: figure out if approaching from both directions is the right thing to do.

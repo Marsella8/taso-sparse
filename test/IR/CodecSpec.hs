@@ -60,9 +60,9 @@ codecTasoSubstitutionRoundTripSpec = do
 
 codecFileLoadSmokeSpec :: Spec
 codecFileLoadSmokeSpec = do
-  substitutions <- runIO (TASO.loadSubstitutions)
+  substitutions <- runIO TASO.loadSubstitutions
   it "codec: load substitutions file" $
-    (not (null substitutions)) `shouldBe` True
+    not (null substitutions) `shouldBe` True
 
 mkCodecSubstitutionSpec :: String -> (Int, Substitution) -> Spec
 mkCodecSubstitutionSpec label (i, rw) =
