@@ -115,13 +115,21 @@ gcMatchedImage candidates origOutputs graph =
      else gcMatchedImage candidates origOutputs (graphWithoutKeys spurious graph)
 
 cseGraph :: Graph -> Graph
-cseGraph (Graph m) =
-  let canonical = Map.fromListWith max [(expr, t) | (t, expr) <- Map.toList m]
+cseGraph g@(Graph m) =
+  let outs = graphOutputs g
+      preferInternal a b
+        | Set.member a outs = b
+        | Set.member b outs = a
+        | otherwise         = max a b
+      canonical = Map.fromListWith preferInternal
+        [(expr, t) | (t, expr) <- Map.toList m, expr /= Input]
       renameMap = Map.fromList
         [ (t, canon)
         | (t, expr) <- Map.toList m
+        , expr /= Input
         , let canon = canonical Map.! expr
         , t /= canon
+        , Set.notMember t outs
         ]
   in if Map.null renameMap
      then Graph m

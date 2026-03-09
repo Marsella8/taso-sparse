@@ -15,6 +15,7 @@ import Axioms
   , axiom27
   , axiom28
   , axiom29
+  , axiom31
   , axiom34
   , axiom38
   , axiom36
@@ -1480,8 +1481,9 @@ unrelatedDuplicateMustSurviveRewriteSpec =
             , (d0, concatT a x y)
             , (out, mul d0 (sc "w"))
             ]
+        axioms = [axiom31, invertSubstitution axiom31]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
-    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
 
 existingIdenticalNodeMayBeReusedSpec :: Spec
 existingIdenticalNodeMayBeReusedSpec =

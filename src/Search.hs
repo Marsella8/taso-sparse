@@ -5,7 +5,7 @@ module Search
 
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
-import IR.Graph (Graph, canonicalizeGraph)
+import IR.Graph (Graph, canonicalizeGraph, cseGraph)
 import Substitutions.Apply (applySubstitution)
 import Substitutions.Substitution (Substitution)
 
@@ -19,7 +19,7 @@ saturateUnderSubstitutions :: Graph -> [Substitution] -> SearchConfig -> Set.Set
 saturateUnderSubstitutions startGraph subs config =
   bfs 0 (Set.singleton startCanon) (Seq.singleton (startCanon, 0))
   where
-    startCanon = canonicalizeGraph startGraph
+    startCanon = canonicalizeGraph (cseGraph startGraph)
     bfs steps seen frontier
       | steps >= maxNumSteps config = seen
       | otherwise =
@@ -32,6 +32,6 @@ saturateUnderSubstitutions startGraph subs config =
                       (seen `Set.union` newGraphs)
                       (frontier' Seq.>< Seq.fromList [(ng, depth + 1) | ng <- Set.toAscList newGraphs])
               where
-                nextGraphs = Set.fromList $ map canonicalizeGraph $ concatMap Set.toList
+                nextGraphs = Set.fromList $ map (canonicalizeGraph . cseGraph) $ concatMap Set.toList
                   [applySubstitution g sub | sub <- subs]
                 newGraphs = Set.filter (`Set.notMember` seen) nextGraphs
