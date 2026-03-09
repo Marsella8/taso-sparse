@@ -7,7 +7,7 @@ import IR.IR
 import Short
 import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
-import Axioms (axiom28, axiom29)
+import Axioms (axiom9, axiom28, axiom29)
 import Substitutions.Substitution (mustSub, invertSubstitution)
 import Test.Hspec (Spec, it, shouldBe)
 
@@ -72,6 +72,7 @@ spec = do
   inverseSplit0IntroducesConcatSplitSpec
   split0ConcatViaApplySubstitutionSpec
   inverseAxiom28SoundnessSpec
+  inverseDoubleTransposeOccurrenceLocalSpec
 
 split0ConcatReducesToFirstArgSpec :: Spec
 split0ConcatReducesToFirstArgSpec =
@@ -92,11 +93,11 @@ split0ConcatReducesToFirstArgSpec =
             ]
             [(axisVar "a", AxisTm axis0)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom28 match
     output `shouldBe` correct
 
@@ -119,11 +120,11 @@ split1ConcatReducesToSecondArgSpec =
             ]
             [(axisVar "a", AxisTm axis1)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom29 match
     output `shouldBe` correct
 
@@ -147,12 +148,12 @@ split0ConcatWithDownstreamUsersSpec =
             ]
             [(axisVar "a", AxisTm axis0)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               , (z, relu x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom28 match
     output `shouldBe` correct
 
@@ -222,12 +223,12 @@ nonInjectiveInternalMatchProducesCorrectResultSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (t "r0", transpose w)
               , (out, ewAdd (t "r0") (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -255,12 +256,12 @@ sourceInputMatchingNonInputTargetProducesCorrectResultSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, transpose w)
               , (out, transpose d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -291,18 +292,18 @@ deepSourceInputMatchingChainedTargetProducesCorrectResultSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, transpose w)
               , (out, relu d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 rewriteWithSharedTargetNodeProducesCorrectSharingSpec :: Spec
 rewriteWithSharedTargetNodeProducesCorrectSharingSpec =
-  it "soundness: rewriting a subgraph that shares a node with the context is rejected when dangling" $ do
+  it "soundness: occurrence-local rewriting of shared subgraph preserves external references" $ do
     let axiom =
           mustSub
             [ (x, inp)
@@ -326,8 +327,16 @@ rewriteWithSharedTargetNodeProducesCorrectSharingSpec =
             , (s0, d0)
             , (out, out)
             ]
+        correct =
+          [mustGraph
+              [ (w, inp)
+              , (d0, relu w)
+              , (out, transpose w)
+              , (z, ewAdd d0 w)
+              ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` Nothing
+    output `shouldBe` correct
 
 rewriteDoesNotInventBindingsSpec :: Spec
 rewriteDoesNotInventBindingsSpec =
@@ -398,9 +407,9 @@ identityInputRewriteLeavesGraphUnchangedSpec =
           tensorMatchOf
             [(x, x)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [(x, inp)]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -427,11 +436,11 @@ identicalUnaryRewriteLeavesGraphUnchangedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, transpose x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -462,12 +471,12 @@ identicalBinaryRewriteLeavesGraphUnchangedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               , (out, matMul x y)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -494,11 +503,11 @@ simpleUnaryRewriteReplacesMatchedBindingSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, transpose x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -526,12 +535,12 @@ simpleUnaryRewritePreservesDownstreamUsersSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, transpose x)
               , (z, matMul out x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -555,7 +564,7 @@ missingSourceInputBindingRejectedSpec =
         match =
           tensorMatchOf
             [(out, out)]
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -579,7 +588,7 @@ missingSourceOutputBindingRejectedSpec =
         match =
           tensorMatchOf
             [(x, x)]
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -606,7 +615,7 @@ missingSharedScalarBindingRejectedSpec =
             , (out, out)
             ]
             []
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -633,7 +642,7 @@ extraTensorBindingRejectedSpec =
             , (out, out)
             , (z, x)
             ]
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -660,7 +669,7 @@ extraTermBindingRejectedSpec =
             , (out, out)
             ]
             [(scalarVar "w", ScalarTm (scalarLit 2))]
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -687,7 +696,7 @@ illSortedScalarBindingRejectedSpec =
             , (out, out)
             ]
             [(scalarVar "w", AxisTm axis0)]
-        correct = Nothing
+        correct = []
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -741,7 +750,7 @@ structurallyInvalidTermMatchRejectedSpec =
 
 danglingInternalUseRejectedSpec :: Spec
 danglingInternalUseRejectedSpec =
-  it "apply: rewriting is rejected when a surviving target binding still uses a deleted internal tensor" $ do
+  it "apply: occurrence-local rewriting preserves externally referenced matched internals" $ do
     let axiom =
           mustSub
             [ (x, inp)
@@ -765,13 +774,20 @@ danglingInternalUseRejectedSpec =
             , (s0, s0)
             , (out, out)
             ]
-        correct = Nothing
+        correct =
+          [mustGraph
+              [ (x, inp)
+              , (s0, relu x)
+              , (out, transpose x)
+              , (z, matMul s0 x)
+              ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
 multipleDanglingUsesRejectedSpec :: Spec
 multipleDanglingUsesRejectedSpec =
-  it "apply: multiple surviving users of a deleted internal tensor are also rejected" $ do
+  it "apply: occurrence-local rewriting preserves multiple external users of matched internals" $ do
     let axiom =
           mustSub
             [ (x, inp)
@@ -796,7 +812,15 @@ multipleDanglingUsesRejectedSpec =
             , (s0, s0)
             , (out, out)
             ]
-        correct = Nothing
+        correct =
+          [mustGraph
+              [ (x, inp)
+              , (s0, relu x)
+              , (out, transpose x)
+              , (z, matMul s0 x)
+              , (w, ewAdd s0 z)
+              ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -826,11 +850,11 @@ aliasedSourceInputsRewriteToSameTargetInputSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (out, ewAdd w w)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -860,11 +884,11 @@ aliasedSourceInputsRewriteToSameConcreteTensorSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (s0, ConstImm)
               , (out, ewAdd s0 s0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -899,11 +923,11 @@ distinctSourceInternalsMayAliasSameTargetInternalSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (out, matMul w w)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -931,12 +955,12 @@ sourceInputMayAliasMatchedInternalTargetTensorSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, transpose w)
               , (out, transpose d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -973,13 +997,13 @@ sourceInputAndMatchedInternalAliasingRejectsRewriteSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, matMul w w)
               , (t "r0", matMul w w)
               , (out, ewAdd (t "r0") d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1007,11 +1031,11 @@ sharedScalarLiteralInstantiatedSpec =
             ]
             [(scalarVar "w", ScalarTm (scalarLit 3))]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (scalarLit 2)))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1043,11 +1067,11 @@ nestedScalarExpressionInstantiatedSpec =
             ]
             [(scalarVar "w", ScalarTm targetScalar)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul targetScalar (scalarLit 2)))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1075,11 +1099,11 @@ repeatedDestinationScalarUsesInstantiateConsistentlySpec =
             ]
             [(scalarVar "w", ScalarTm (scalarLit 3))]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (scalarLit 3)))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1109,11 +1133,11 @@ scalarInstantiationIsAtomicAcrossSwappedBindingsSpec =
             , (scalarVar "v", ScalarTm (scalarLit 2))
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 2) (sc "v")))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1141,11 +1165,11 @@ destinationOnlyScalarVariableRemainsAbstractSpec =
             ]
             [(scalarVar "w", ScalarTm (scalarLit 3))]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul (scalarLit 3) (sc "fresh")))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1177,11 +1201,11 @@ deeplyNestedScalarExpressionInstantiatedSpec =
             ]
             [(scalarVar "w", ScalarTm targetScalar)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, mul x (ScalarMul targetScalar (ScalarMul targetScalar (scalarLit 5))))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1213,12 +1237,12 @@ axisLiteralInstantiatedSpec =
             ]
             [(axisVar "a", AxisTm axis0)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               , (out, concatT axis0 y x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1251,12 +1275,12 @@ axisVariableInstantiatedSpec =
             ]
             [(axisVar "a", AxisTm targetAxis)]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               , (out, concatT targetAxis y x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1294,12 +1318,12 @@ convTermsInstantiateTogetherSpec =
             , (actiVar "c", ActiModeTm actRelu)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (y, inp)
               , (out, conv2d kernel stride padValid actRelu y x)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1327,12 +1351,12 @@ destinationInternalFreshenedEvenWithoutCollisionSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1362,14 +1386,14 @@ destinationInternalCollisionWithExternalTargetTensorSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (z, transpose x)
               , (s0, relu z)
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1398,13 +1422,13 @@ destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (s0, ConstImm)
               , (t "r0", transpose s0)
               , (out, relu (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1435,8 +1459,7 @@ destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (t "r0", inp)
               , (t "r1", transpose (t "r0"))
@@ -1444,6 +1467,7 @@ destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
               , (t "r3", relu (t "r2"))
               , (out, matMul (t "r2") (t "r3"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1472,13 +1496,13 @@ destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec =
             , (y, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (z, matMul out x)
               , (t "r0", transpose x)
               , (out, relu (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1507,13 +1531,13 @@ destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (t "r2", transpose x)
               , (t "r3", relu (t "r2"))
               , (out, matMul (t "r2") (t "r3"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1542,13 +1566,13 @@ unrelatedDisconnectedTargetBindingsPreservedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (x, inp)
               , (out, transpose x)
               , (z, inp)
               , (w, transpose z)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1581,12 +1605,12 @@ sourceInputAliasesInternalBindingPreservedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, relu w)
               , (out, ewAdd w d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1620,13 +1644,13 @@ sourceInputAliasesInternalWithDstInternalsSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, relu w)
               , (t "r0", transpose d0)
               , (out, ewAdd w (t "r0"))
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
 
@@ -1660,12 +1684,32 @@ sourceInputAliasesInternalSurvivingRefPreservedSpec =
             , (out, out)
             ]
         correct =
-          Just $
-            mustGraph
+          [mustGraph
               [ (w, inp)
               , (d0, relu w)
               , (out, ewAdd w d0)
               , (z, transpose d0)
               ]
+          ]
         output = applyMatchedSubstitution targetGraph axiom match
     output `shouldBe` correct
+
+inverseDoubleTransposeOccurrenceLocalSpec :: Spec
+inverseDoubleTransposeOccurrenceLocalSpec =
+  it "apply: inverse double-transpose applied occurrence-locally reuses existing subexpressions" $ do
+    let axiom = invertSubstitution axiom9
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (out, matMul x s0)
+            ]
+        output = applySubstitution targetGraph axiom
+    Set.member
+      (mustGraph
+        [ (x, inp)
+        , (s0, transpose x)
+        , (t "r1", transpose s0)
+        , (out, matMul (t "r1") s0)
+        ])
+      output `shouldBe` True

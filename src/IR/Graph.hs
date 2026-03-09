@@ -14,6 +14,10 @@ module IR.Graph
   , graphWithoutKeys
   , graphRestrictKeys
   , graphRename
+  , graphUpdateBinding
+  , graphAddBindings
+  , gcMatchedImage
+  , cseGraph
   , varsInGraph
   , instantiateGraphTerms
   , canonicalizeGraph
@@ -91,6 +95,41 @@ graphWithoutKeys tensors (Graph m) = Graph (Map.withoutKeys m tensors)
 
 graphRestrictKeys :: Set Tensor -> Graph -> Graph
 graphRestrictKeys tensors (Graph m) = Graph (Map.restrictKeys m tensors)
+
+graphUpdateBinding :: Tensor -> Expr -> Graph -> Graph
+graphUpdateBinding t expr (Graph m) = Graph (Map.insert t expr m)
+
+graphAddBindings :: [(Tensor, Expr)] -> Graph -> Maybe Graph
+graphAddBindings bindings (Graph m)
+  | all (\(t, _) -> not (Map.member t m)) bindings =
+      Just (Graph (Map.union (Map.fromList bindings) m))
+  | otherwise = Nothing
+
+gcMatchedImage :: Set Tensor -> Set Tensor -> Graph -> Graph
+gcMatchedImage candidates origOutputs graph =
+  let present = candidates `Set.intersection` graphTensorVars graph
+      unrefd = Set.filter (`Set.notMember` graphRefs graph) present
+      spurious = unrefd `Set.difference` origOutputs
+  in if Set.null spurious
+     then graph
+     else gcMatchedImage candidates origOutputs (graphWithoutKeys spurious graph)
+
+cseGraph :: Graph -> Graph
+cseGraph (Graph m) =
+  let canonical = Map.fromListWith max [(expr, t) | (t, expr) <- Map.toList m]
+      renameMap = Map.fromList
+        [ (t, canon)
+        | (t, expr) <- Map.toList m
+        , let canon = canonical Map.! expr
+        , t /= canon
+        ]
+  in if Map.null renameMap
+     then Graph m
+     else cseGraph $ Graph $ Map.fromList
+       [ (t, atomicExprRename renameMap expr)
+       | (t, expr) <- Map.toList m
+       , not (Map.member t renameMap)
+       ]
 
 varsInGraph :: Graph -> Set Var
 varsInGraph g =

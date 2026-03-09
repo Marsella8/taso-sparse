@@ -25,7 +25,7 @@ import Axioms
   )
 import qualified Data.Set as Set
 import IR.Graph (Graph, mustGraph)
-import IR.IR (Expr(..), Kernel2DTerm(..), Kernel2DVariable(..))
+import IR.IR (Expr(..))
 import IR.Isomorphic (isomorphicGraphs)
 import Search (SearchConfig(..), saturateUnderSubstitutions)
 import Short
@@ -50,7 +50,6 @@ spec = do
   leftConstIConvShouldCollapseToEnlargeSpec
   sameKernelConvMergeShouldBeReachableSpec
   singleConvKernelEnlargementShouldBeReachableSpec
-  singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec
   singleSplit0PackagingShouldBeReachableSpec
   split0ThenSplit1PackagingShouldBeReachableSpec
   enlargedKernelConvMergeShouldBeReachableSpec
@@ -75,6 +74,25 @@ spec = do
   convInputBatchingShouldBeReachableSpec
   multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec
   transposeDistributionShouldReuseSharedSubexpressionsSpec
+  multiUseDoubleTransposeInsertionShouldComposeSpec
+  transposeConcatWithOutsideInputUseShouldBeReachableSpec
+  matmulConcatDistributionWithSideUseShouldBeReachableSpec
+  convEnlargementWithSideUseShouldBeReachableSpec
+  constIConvPoolCollapseWithSideUseShouldBeReachableSpec
+  matmulIdentityWithDownstreamUseShouldBeReachableSpec
+  split0ConcatWithDownstreamUseShouldBeReachableSpec
+  scalarDistributionWithDuplicateOutsideUseShouldBeReachableSpec
+  wrongReusedNodeShouldNotBeReachableSpec
+  freshNameCollisionMustNotClobberExistingBindingSpec
+  deletedInternalWithOutsideConsumerMustNotDropOutputSpec
+  wrongScalarFactorizationMustNotMatchSpec
+  wrongAxisOnTransposeConcatMustNotMatchSpec
+  wrongPaddingOnConvEnlargementMustNotMatchSpec
+  wrongSplitOutputIdentificationMustNotMatchSpec
+  unrelatedDuplicateMustSurviveRewriteSpec
+  existingIdenticalNodeMayBeReusedSpec
+  mismatchedExistingNodeMustNotBeReusedSpec
+  occupiedFreshNamesMustNotBeClobberedSpec
 
 emptyAxiomListReturnsStartGraphSpec :: Spec
 emptyAxiomListReturnsStartGraphSpec =
@@ -435,28 +453,6 @@ singleConvKernelEnlargementShouldBeReachableSpec =
         axioms = [axiom21]
     expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
 
-singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec :: Spec
-singleConvKernelEnlargementWithAbstractKernelShouldBeReachableSpec =
-  it "search: a single conv should keep an abstract destination kernel when the source kernel is abstract" $ do
-    let k1' = Kernel2DTermVar (Kernel2DVariable "k1")
-        w0 = t "w0"
-        k2' = Kernel2DTermVar (Kernel2DVariable "k2")
-        startGraph =
-          mustGraph
-            [ (x, inp)
-            , (w0, inp)
-            , (out, conv2d k1' stride11 padSame actNone x w0)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (w0, inp)
-            , (d0, enlarge k2' w0)
-            , (out, conv2d k2' stride11 padSame actNone x d0)
-            ]
-        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
-        axioms = [axiom21]
-    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
 
 singleSplit0PackagingShouldBeReachableSpec :: Spec
 singleSplit0PackagingShouldBeReachableSpec =
@@ -670,9 +666,8 @@ fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec =
           mustGraph
             [ (x, inp)
             , (s0, transpose x)
-            , (t "d0", transpose x)
-            , (t "d1", transpose (t "d0"))
-            , (out, ewAdd (t "d1") s0)
+            , (t "d0", transpose s0)
+            , (out, ewAdd (t "d0") s0)
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
     expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
@@ -1108,9 +1103,176 @@ multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec =
           ]
     expectMutuallyReachable startGraph targetGraph subs config
 
+transposeConcatWithOutsideInputUseShouldBeReachableSpec :: Spec
+transposeConcatWithOutsideInputUseShouldBeReachableSpec =
+  it "search: transpose-concat axis swap should be reachable with outside uses of the inputs" $ do
+    let tag = t "tag"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (tag, relu y)
+            , (s0, transpose x)
+            , (s1, transpose y)
+            , (out, concatT axis1 s0 s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (tag, relu y)
+            , (d0, concatT axis0 x y)
+            , (out, transpose d0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+matmulConcatDistributionWithSideUseShouldBeReachableSpec :: Spec
+matmulConcatDistributionWithSideUseShouldBeReachableSpec =
+  it "search: matmul-concat distribution should be reachable with name pressure and side uses" $ do
+    let side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (w, inp)
+            , (side, relu x)
+            , (s0, concatT axis1 x z)
+            , (s1, concatT axis0 y w)
+            , (out, matMul s0 s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (w, inp)
+            , (side, relu x)
+            , (d0, matMul x y)
+            , (d1, matMul z w)
+            , (out, ewAdd d0 d1)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+convEnlargementWithSideUseShouldBeReachableSpec :: Spec
+convEnlargementWithSideUseShouldBeReachableSpec =
+  it "search: conv2d kernel enlargement should be reachable with a side use of the weight input" $ do
+    let tag = t "tag"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (tag, relu y)
+            , (out, conv2d (kernelLit 1 3) s padSame c x y)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (tag, relu y)
+            , (d0, enlarge (kernelLit 3 3) y)
+            , (out, conv2d (kernelLit 3 3) s padSame c x d0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+constIConvPoolCollapseWithSideUseShouldBeReachableSpec :: Spec
+constIConvPoolCollapseWithSideUseShouldBeReachableSpec =
+  it "search: ConstIConv -> pool2dAvg -> conv2d should collapse to pool2dAvg with a side use of x" $ do
+    let ic = t "ic"
+        p0 = t "p0"
+        tag = t "tag"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (ic, ConstIConv k)
+            , (p0, pool2dAvg k stride11 padSame ic)
+            , (tag, relu x)
+            , (out, conv2d k s p actNone x p0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (tag, relu x)
+            , (out, pool2dAvg k s p x)
+            ]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 10000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+matmulIdentityWithDownstreamUseShouldBeReachableSpec :: Spec
+matmulIdentityWithDownstreamUseShouldBeReachableSpec =
+  it "search: matmul(x, ConstImm) should collapse to x even when the result has a downstream use" $ do
+    let imm = t "imm"
+        use = t "use"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (imm, ConstImm)
+            , (out, matMul x imm)
+            , (use, ewAdd out x)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (use, ewAdd x x)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+split0ConcatWithDownstreamUseShouldBeReachableSpec :: Spec
+split0ConcatWithDownstreamUseShouldBeReachableSpec =
+  it "search: split0(concat(x, y)) should collapse to x even when the result has a downstream use" $ do
+    let use = t "use"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT a x y)
+            , (out, split0 a s0)
+            , (use, ewAdd out y)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (use, ewAdd x y)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+scalarDistributionWithDuplicateOutsideUseShouldBeReachableSpec :: Spec
+scalarDistributionWithDuplicateOutsideUseShouldBeReachableSpec =
+  it "search: scalar distribution over concat should preserve a duplicate outside use" $ do
+    let u0 = t "u0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "w"))
+            , (u0, mul x (sc "w"))
+            , (out, concatT a s0 s1)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (u0, mul x (sc "w"))
+            , (d0, concatT a x y)
+            , (out, mul d0 (sc "w"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
 expectReachable :: Graph -> Set.Set Graph -> IO ()
 expectReachable targetGraph searchedGraphs =
   any (`isomorphicGraphs` targetGraph) (Set.toList searchedGraphs) `shouldBe` True
+
+expectNotReachable :: Graph -> Set.Set Graph -> IO ()
+expectNotReachable badGraph searchedGraphs =
+  any (`isomorphicGraphs` badGraph) (Set.toList searchedGraphs) `shouldBe` False
 
 expectSameGraphSets :: Set.Set Graph -> Set.Set Graph -> IO ()
 expectSameGraphSets actual expected = do
@@ -1122,3 +1284,280 @@ expectMutuallyReachable :: Graph -> Graph -> [Substitution] -> SearchConfig -> I
 expectMutuallyReachable lhs rhs subs config = do
   expectReachable rhs (saturateUnderSubstitutions lhs subs config)
   expectReachable lhs (saturateUnderSubstitutions rhs subs config)
+
+multiUseDoubleTransposeInsertionShouldComposeSpec :: Spec
+multiUseDoubleTransposeInsertionShouldComposeSpec =
+  it "search: two separate occurrence-local double-transpose insertions should compose across BFS steps" $ do
+    let mid = t "mid"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (t "d0", transpose s0)
+            , (t "e0", transpose (t "d0"))
+            , (mid, matMul (t "d0") s0)
+            , (out, matMul (t "e0") mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+
+wrongReusedNodeShouldNotBeReachableSpec :: Spec
+wrongReusedNodeShouldNotBeReachableSpec =
+  it "search: soundness K: reusing d0 for both mid and out is wrong (d0=T(s0)=x, not s0)" $ do
+    let mid = t "mid"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, transpose s0)
+            , (mid, matMul d0 s0)
+            , (out, matMul d0 mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectNotReachable badGraph
+      (saturateUnderSubstitutions startGraph [axiom9, invertSubstitution axiom9] config)
+
+freshNameCollisionMustNotClobberExistingBindingSpec :: Spec
+freshNameCollisionMustNotClobberExistingBindingSpec =
+  it "search: soundness L: rewrite must not clobber an existing d0=Relu(x) binding" $ do
+    let mid = t "mid"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, relu x)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, transpose s0)
+            , (mid, matMul d0 s0)
+            , (out, matMul s0 mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectNotReachable badGraph
+      (saturateUnderSubstitutions startGraph [axiom9, invertSubstitution axiom9] config)
+
+deletedInternalWithOutsideConsumerMustNotDropOutputSpec :: Spec
+deletedInternalWithOutsideConsumerMustNotDropOutputSpec =
+  it "search: soundness M: applying axiom31 must not drop side output when s0 has an outside consumer" $ do
+    let side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "w"))
+            , (side, relu s0)
+            , (out, concatT a s0 s1)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (out, mul d0 (sc "w"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+wrongScalarFactorizationMustNotMatchSpec :: Spec
+wrongScalarFactorizationMustNotMatchSpec =
+  it "search: soundness N: different scalars w and u must not be factored together" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "u"))
+            , (out, concatT a s0 s1)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (out, mul d0 (sc "w"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+wrongAxisOnTransposeConcatMustNotMatchSpec :: Spec
+wrongAxisOnTransposeConcatMustNotMatchSpec =
+  it "search: soundness O: axiom35 is axis1->axis0, axis0 input must not match" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, transpose x)
+            , (s1, transpose y)
+            , (out, concatT axis0 s0 s1)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT axis0 x y)
+            , (out, transpose d0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+wrongPaddingOnConvEnlargementMustNotMatchSpec :: Spec
+wrongPaddingOnConvEnlargementMustNotMatchSpec =
+  it "search: soundness P: axiom21 requires padSame, padValid must not produce padSame enlargement" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (out, conv2d (kernelLit 1 3) s padValid c x y)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, enlarge (kernelLit 3 3) y)
+            , (out, conv2d (kernelLit 3 3) s padSame c x d0)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+wrongSplitOutputIdentificationMustNotMatchSpec :: Spec
+wrongSplitOutputIdentificationMustNotMatchSpec =
+  it "search: soundness Q: split1 maps to y not x, EwAdd(x,x) is wrong" $ do
+    let use = t "use"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, concatT a x y)
+            , (out, split1 a s0)
+            , (use, ewAdd out x)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (use, ewAdd x x)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+unrelatedDuplicateMustSurviveRewriteSpec :: Spec
+unrelatedDuplicateMustSurviveRewriteSpec =
+  it "search: soundness R: unrelated duplicate u0=Mul(x,w) must not be deleted by scalar distribution" $ do
+    let u0 = t "u0"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "w"))
+            , (u0, mul x (sc "w"))
+            , (out, concatT a s0 s1)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (out, mul d0 (sc "w"))
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+existingIdenticalNodeMayBeReusedSpec :: Spec
+existingIdenticalNodeMayBeReusedSpec =
+  it "search: soundness S+: existing T(s0) node should be reused via CSE during double-transpose insertion" $ do
+    let mid = t "mid"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, transpose s0)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, transpose s0)
+            , (mid, matMul d0 s0)
+            , (out, matMul s0 mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectReachable targetGraph
+      (saturateUnderSubstitutions startGraph [axiom9, invertSubstitution axiom9] config)
+
+mismatchedExistingNodeMustNotBeReusedSpec :: Spec
+mismatchedExistingNodeMustNotBeReusedSpec =
+  it "search: soundness S-: existing Relu(x) must not be reused as if it were T(s0)" $ do
+    let mid = t "mid"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, relu x)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, relu x)
+            , (mid, matMul d0 s0)
+            , (out, matMul s0 mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectNotReachable badGraph
+      (saturateUnderSubstitutions startGraph [axiom9, invertSubstitution axiom9] config)
+
+occupiedFreshNamesMustNotBeClobberedSpec :: Spec
+occupiedFreshNamesMustNotBeClobberedSpec =
+  it "search: soundness T: d0=Relu(x) and e0=Relu(s0) must survive double-transpose insertion" $ do
+    let mid = t "mid"
+        e0 = t "e0"
+        f0 = t "f0"
+        f1 = t "f1"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, relu x)
+            , (e0, relu s0)
+            , (mid, matMul x s0)
+            , (out, matMul s0 mid)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, transpose x)
+            , (d0, relu x)
+            , (e0, relu s0)
+            , (f0, transpose s0)
+            , (f1, transpose f0)
+            , (mid, matMul f0 s0)
+            , (out, matMul f1 mid)
+            ]
+        config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
+    expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+

@@ -381,20 +381,18 @@ axiom20 =
     ]
     (out, out)
 
---note: right now we cannot really model enlarge semantics properly so we are doing this (enlarge only goes from 1x3 to 3x3 anyways)
+-- temporary fix where we are only allowing 1x3 -> 3x3 enlargement (should be fine)
 axiom21 :: Substitution
-axiom21 = let
-  k1 = Kernel2DTermVar (Kernel2DVariable "k1")
-  k2 = Kernel2DTermVar (Kernel2DVariable "k2")
-  in mustSub
+axiom21 =
+  mustSub
     [ (x, inp)
     , (y, inp)
-    , (out, conv2d k1 s padSame c x y)
+    , (out, conv2d (kernelLit 1 3) s padSame c x y)
     ]
     [ (x, inp)
     , (y, inp)
-    , (d0, enlarge k2 y)
-    , (out, conv2d k2 s padSame c x d0)
+    , (d0, enlarge (kernelLit 3 3) y)
+    , (out, conv2d (kernelLit 3 3) s padSame c x d0)
     ]
     (out, out)
 
