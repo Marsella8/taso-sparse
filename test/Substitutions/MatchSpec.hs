@@ -1,12 +1,13 @@
 module Substitutions.MatchSpec where
 
+import Axioms (axiom29)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import IR.Graph (mustGraph)
 import IR.IR
 import Short
 import Substitutions.Match (Match(..), matchIsComplete, matchSubstitution)
-import Substitutions.Substitution (Substitution, mustSub, mustSubstitution)
+import Substitutions.Substitution (Substitution, invertSubstitution, mustSub, mustSubstitution)
 import Test.Hspec (Spec, it, shouldBe)
 
 spec :: Spec
@@ -46,6 +47,8 @@ spec = do
   multiOutputNoMatchWhenOutputsMismatchSpec
   multiOutputSharedInternalConsistencySpec
   multiOutputTwoOutputsCannotMapToSameTensorSpec
+  inverseSplit1PackagingMatchesHiddenInputSiblingsSpec
+  inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
 matchOf tensorBindings termBindings =
@@ -532,3 +535,33 @@ multiOutputTwoOutputsCannotMapToSameTensorSpec =
             ]
         output = matchSubstitution sub targetGraph
     output `shouldBe` Set.empty
+
+inverseSplit1PackagingMatchesHiddenInputSiblingsSpec :: Spec
+inverseSplit1PackagingMatchesHiddenInputSiblingsSpec =
+  it "match: inverse split1 packaging can match hidden graph inputs feeding an existing concat" $ do
+    let sub = invertSubstitution axiom29
+        targetGraph =
+          mustGraph
+            [ (t "r0", inp)
+            , (t "r1", inp)
+            , (t "r2", concatT a (t "r0") (t "r1"))
+            , (x, split0 a (t "r2"))
+            ]
+        output = matchSubstitution sub targetGraph
+    Set.member (matchOf [(x, t "r0"), (y, t "r1")] []) output `shouldBe` True
+
+inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec :: Spec
+inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec =
+  it "match: inverse split1 packaging can match hidden internal siblings feeding an existing concat" $ do
+    let sub = invertSubstitution axiom29
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (t "r0", relu x)
+            , (t "r1", relu y)
+            , (t "r2", concatT a (t "r0") (t "r1"))
+            , (s0, split0 a (t "r2"))
+            ]
+        output = matchSubstitution sub targetGraph
+    Set.member (matchOf [(x, t "r0"), (y, t "r1")] []) output `shouldBe` True

@@ -53,6 +53,8 @@ fwdSubs =
   , axiom44a
   , axiom44b
   , lemmaTransposeConstImm
+  , lemmaLeftConstImm
+  , lemmaPool2dAvgConcatAxis0
   ]
 
 bwdSubs :: [Substitution]
@@ -467,6 +469,17 @@ lemmaTransposeConstImm =
     ]
     (out, out)
 
+lemmaLeftConstImm :: Substitution
+lemmaLeftConstImm =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstImm)
+    , (out, matMul s0 x)
+    ]
+    [ (x, inp)
+    ]
+    (out, x)
+
 axiom27 :: Substitution
 axiom27 =
   mustSub
@@ -727,6 +740,22 @@ axiom41 =
     [ (x, inp)
     , (y, inp)
     , (d0, concatT axis1 x y)
+    , (out, pool2dAvg k s p d0)
+    ]
+    (out, out)
+
+lemmaPool2dAvgConcatAxis0 :: Substitution
+lemmaPool2dAvgConcatAxis0 =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (s0, pool2dAvg k s p x)
+    , (s1, pool2dAvg k s p y)
+    , (out, concatT axis0 s0 s1)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (d0, concatT axis0 x y)
     , (out, pool2dAvg k s p d0)
     ]
     (out, out)
