@@ -38,12 +38,38 @@ mkGraph :: [(Tensor, Expr)] -> Maybe Graph
 mkGraph bindings = do
   guard (Map.size m == length bindings) -- no duplicate bindings
   guard (Set.null freeVars) -- no free variables
+  guard (isAcyclic m)
   Just g
   where
     m = Map.fromList bindings
     g = Graph m
     allVars = Set.unions (Set.map tensorsInExpr $ graphExprs g) -- all used variables
     freeVars = allVars Set.\\ graphTensorVars g
+
+isAcyclic :: Map.Map Tensor Expr -> Bool
+isAcyclic m = go (Map.keys m) Set.empty Set.empty
+  where
+    go [] _ _ = True
+    go (t : ts) visited stack
+      | Set.member t visited = go ts visited stack
+      | otherwise = case dfs t visited stack of
+          Nothing    -> False
+          Just visited' -> go ts visited' stack
+    dfs t visited stack
+      | Set.member t stack = Nothing
+      | Set.member t visited = Just visited
+      | otherwise =
+          let stack' = Set.insert t stack
+              children = case Map.lookup t m of
+                Just expr -> Set.toList (tensorsInExpr expr)
+                Nothing   -> []
+          in case foldlM (\v c -> dfs c v stack') (Just visited) children of
+              Nothing -> Nothing
+              Just visited' -> Just (Set.insert t visited')
+    foldlM _ acc [] = acc
+    foldlM f acc (c : cs) = case acc of
+      Nothing -> Nothing
+      Just v  -> foldlM f (f v c) cs
 
 mustGraph :: [(Tensor, Expr)] -> Graph
 mustGraph bindings =

@@ -17,8 +17,9 @@ import Axioms
   , axiom29
   , axiom31
   , axiom34
-  , axiom38
+  , axiom35
   , axiom36
+  , axiom38
   , axiom39
   , axiom44a
   , axiom44b
@@ -94,6 +95,14 @@ spec = do
   existingIdenticalNodeMayBeReusedSpec
   mismatchedExistingNodeMustNotBeReusedSpec
   occupiedFreshNamesMustNotBeClobberedSpec
+  sharedInternalBothConsumersRewrittenShouldReachSpec
+  sharedInternalWrongLaterConsumerShouldNotReachSpec
+  sharedAddBothOutputsRewrittenShouldReachSpec
+  sharedAddOneBranchDropsYShouldNotReachSpec
+  hangingConsumerWeirdStructuralShouldReachSpec
+  wrongPoolOperatorShouldNotReachSpec
+  parameterSensitiveConvShouldNotReachSpec
+  cseBadWitnessReuseMultiInputShouldNotReachSpec
 
 emptyAxiomListReturnsStartGraphSpec :: Spec
 emptyAxiomListReturnsStartGraphSpec =
@@ -1562,4 +1571,209 @@ occupiedFreshNamesMustNotBeClobberedSpec =
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
     expectMutuallyReachable startGraph targetGraph [axiom9, invertSubstitution axiom9] config
+
+sharedInternalBothConsumersRewrittenShouldReachSpec :: Spec
+sharedInternalBothConsumersRewrittenShouldReachSpec =
+  it "search: shared internal with both consumers rewritten should reach target" $ do
+    let side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (side, split0 a d0)
+            , (out, mul d0 (sc "w"))
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "w"))
+            , (out, concatT a s0 s1)
+            ]
+        axioms = [axiom28, invertSubstitution axiom28, axiom31, invertSubstitution axiom31]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
+sharedInternalWrongLaterConsumerShouldNotReachSpec :: Spec
+sharedInternalWrongLaterConsumerShouldNotReachSpec =
+  it "search: shared internal with wrong later consumer should not reach bad target" $ do
+    let side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (side, split0 a d0)
+            , (out, mul d0 (sc "w"))
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT a x y)
+            , (s0, mul x (sc "w"))
+            , (s1, mul y (sc "w"))
+            , (side, split1 a d0)
+            , (out, concatT a s0 s1)
+            ]
+        axioms = [axiom28, invertSubstitution axiom28, axiom31, invertSubstitution axiom31]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
+
+sharedAddBothOutputsRewrittenShouldReachSpec :: Spec
+sharedAddBothOutputsRewrittenShouldReachSpec =
+  it "search: shared add with both outputs rewritten should reach target" $ do
+    let out0 = t "out0"
+        out1 = t "out1"
+        t0 = t "t0"
+        t1 = t "t1"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (s0, ewAdd x y)
+            , (out0, matMul z s0)
+            , (out1, transpose s0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (d0, matMul z x)
+            , (d1, matMul z y)
+            , (out0, ewAdd d0 d1)
+            , (t0, transpose x)
+            , (t1, transpose y)
+            , (out1, ewAdd t0 t1)
+            ]
+        axioms = [axiom15, invertSubstitution axiom15, axiom10, invertSubstitution axiom10]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
+sharedAddOneBranchDropsYShouldNotReachSpec :: Spec
+sharedAddOneBranchDropsYShouldNotReachSpec =
+  it "search: shared add one branch silently drops y should not reach" $ do
+    let out0 = t "out0"
+        out1 = t "out1"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (s0, ewAdd x y)
+            , (out0, matMul z s0)
+            , (out1, transpose s0)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (d0, matMul z x)
+            , (d1, matMul z y)
+            , (out0, ewAdd d0 d1)
+            , (out1, transpose x)
+            ]
+        axioms = [axiom15, invertSubstitution axiom15, axiom10, invertSubstitution axiom10]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
+
+hangingConsumerWeirdStructuralShouldReachSpec :: Spec
+hangingConsumerWeirdStructuralShouldReachSpec =
+  it "search: weird structural rule with hanging consumer should reach" $ do
+    let side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, concatT axis0 x y)
+            , (side, split1 axis0 d0)
+            , (out, transpose d0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (s0, transpose x)
+            , (s1, transpose y)
+            , (out, concatT axis1 s0 s1)
+            ]
+        axioms = [axiom29, invertSubstitution axiom29, axiom35, invertSubstitution axiom35]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
+
+wrongPoolOperatorShouldNotReachSpec :: Spec
+wrongPoolOperatorShouldNotReachSpec =
+  it "search: ConstIConv chain should not reach pool2dMax when axioms give pool2dAvg" $ do
+    let ic = t "ic"
+        p0 = t "p0"
+        tag = t "tag"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (ic, ConstIConv k)
+            , (p0, pool2dAvg k stride11 padSame ic)
+            , (tag, relu x)
+            , (out, conv2d k s p actNone x p0)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (tag, relu x)
+            , (out, pool2dMax k s p x)
+            ]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 10000}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+parameterSensitiveConvShouldNotReachSpec :: Spec
+parameterSensitiveConvShouldNotReachSpec =
+  it "search: conv2d 1x3 padSame must not produce 3x3 padValid enlargement" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (out, conv2d (kernelLit 1 3) s padSame c x y)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, enlarge (kernelLit 3 3) y)
+            , (out, conv2d (kernelLit 3 3) s padValid c x d0)
+            ]
+        axioms = [axiom21, invertSubstitution axiom21]
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
+
+cseBadWitnessReuseMultiInputShouldNotReachSpec :: Spec
+cseBadWitnessReuseMultiInputShouldNotReachSpec =
+  it "search: CSE must not reuse matMul(x,y) as matMul(x,z) in multi-input inverse" $ do
+    let u0 = t "u0"
+        side = t "side"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (d0, concatT axis1 y z)
+            , (u0, matMul x y)
+            , (side, relu u0)
+            , (out, matMul x d0)
+            ]
+        badGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (u0, matMul x y)
+            , (side, relu u0)
+            , (out, concatT axis1 u0 u0)
+            ]
+        axioms = [axiom36, invertSubstitution axiom36]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
+    expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
 

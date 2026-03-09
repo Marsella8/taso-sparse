@@ -12,6 +12,8 @@ spec :: Spec
 spec = do
   duplicateAssignmentRejectedSpec
   undeclaredTensorRejectedSpec
+  selfLoopRejectedSpec
+  indirectCycleRejectedSpec
   graphTensorVarsSpec
   graphVarsSpec
   explicitInputsSpec
@@ -46,6 +48,16 @@ undeclaredTensorRejectedSpec =
         correct = Nothing :: Maybe Graph
         output = mkGraph input
     output `shouldBe` correct
+
+selfLoopRejectedSpec :: Spec
+selfLoopRejectedSpec =
+  it "graph: self-loop rejected" $ do
+    mkGraph [(x, transpose x)] `shouldBe` (Nothing :: Maybe Graph)
+
+indirectCycleRejectedSpec :: Spec
+indirectCycleRejectedSpec =
+  it "graph: indirect cycle rejected" $ do
+    mkGraph [(s0, transpose d0), (d0, transpose s0)] `shouldBe` (Nothing :: Maybe Graph)
 
 graphTensorVarsSpec :: Spec
 graphTensorVarsSpec =
