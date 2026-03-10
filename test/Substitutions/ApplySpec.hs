@@ -73,6 +73,7 @@ spec = do
   split0ConcatViaApplySubstitutionSpec
   multiOutputSourceSubstitutionRejectedSpec
   inverseDoubleTransposeOccurrenceLocalSpec
+  split0PassThroughRemovesDanglingSourceInputSpec
 
 split0ConcatReducesToFirstArgSpec :: Spec
 split0ConcatReducesToFirstArgSpec =
@@ -95,7 +96,6 @@ split0ConcatReducesToFirstArgSpec =
         correct =
           [mustGraph
               [ (x, inp)
-              , (y, inp)
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom28 match
@@ -121,8 +121,7 @@ split1ConcatReducesToSecondArgSpec =
             [(axisVar "a", AxisTm axis1)]
         correct =
           [mustGraph
-              [ (x, inp)
-              , (y, inp)
+              [ (y, inp)
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom29 match
@@ -150,7 +149,6 @@ split0ConcatWithDownstreamUsersSpec =
         correct =
           [mustGraph
               [ (x, inp)
-              , (y, inp)
               , (z, relu x)
               ]
           ]
@@ -180,7 +178,7 @@ multiOutputSourceSubstitutionRejectedSpec =
             , (y, inp)
             ]
     evaluate (Set.size (applySubstitution targetGraph inv28))
-      `shouldThrow` errorCall "applySubstitution: substitutions with multiple source outputs are unsupported"
+      `shouldThrow` errorCall "matchSubstitution: substitutions with multiple source outputs are unsupported"
 
 nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
 nonInjectiveInternalMatchProducesCorrectResultSpec =
@@ -1701,3 +1699,41 @@ inverseDoubleTransposeOccurrenceLocalSpec =
         , (out, matMul (t "r1") s0)
         ])
       output `shouldBe` True
+
+split0PassThroughRemovesDanglingSourceInputSpec :: Spec
+split0PassThroughRemovesDanglingSourceInputSpec =
+  it "apply: split0 pass-through removes dangling source inputs via dead code elimination" $ do
+    let ta = t "a"
+        tb = t "b"
+        tc = t "c"
+        tx = t "tx"
+        ty = t "ty"
+        t1 = t "t1"
+        t2 = t "t2"
+        t3 = t "t3"
+        t4 = t "t4"
+        t5 = t "t5"
+        targetGraph =
+          mustGraph
+            [ (ta, inp)
+            , (tb, inp)
+            , (tc, inp)
+            , (tx, matMul ta tb)
+            , (ty, matMul tb tc)
+            , (t1, concatT a tx ty)
+            , (t2, split0 a t1)
+            , (t3, transpose t2)
+            , (t4, relu t2)
+            , (t5, matMul t3 t4)
+            ]
+        expected =
+          mustGraph
+            [ (ta, inp)
+            , (tb, inp)
+            , (tx, matMul ta tb)
+            , (t3, transpose tx)
+            , (t4, relu tx)
+            , (t5, matMul t3 t4)
+            ]
+        output = applySubstitution targetGraph axiom28
+    Set.member expected output `shouldBe` True

@@ -25,6 +25,7 @@ import Axioms
   , axiom44b
   , lemmaTransposeConstImm
   )
+import Control.Parallel.Strategies (runEval, rpar, rseq)
 import qualified Data.Set as Set
 import IR.Graph (Graph, mustGraph)
 import IR.IR (Expr(..))
@@ -32,10 +33,10 @@ import IR.Isomorphic (isomorphicGraphs)
 import Search (SearchConfig(..), saturateUnderSubstitutions)
 import Short
 import Substitutions.Substitution (Substitution, invertSubstitution, mustSub)
-import Test.Hspec (Spec, it, shouldBe)
+import Test.Hspec (Spec, it, parallel, shouldBe)
 
 spec :: Spec
-spec = do
+spec = parallel $ do
   emptyAxiomListReturnsStartGraphSpec
   multipleApplicableAxiomsUnionTheirResultsSpec
   cyclesAreDeduplicatedAndDoNotLoopSpec
@@ -96,6 +97,8 @@ spec = do
   wrongPoolOperatorShouldNotReachSpec
   parameterSensitiveConvShouldNotReachSpec
   cseBadWitnessReuseMultiInputShouldNotReachSpec
+  split0ConcatFanoutWithDeadCodeCascadeReluSpec
+  split0ConcatFanoutWithDeadCodeCascadeMatMulSpec
 
 emptyAxiomListReturnsStartGraphSpec :: Spec
 emptyAxiomListReturnsStartGraphSpec =
@@ -1080,8 +1083,14 @@ expectSameGraphSets actual expected = do
 
 expectMutuallyReachable :: Graph -> Graph -> [Substitution] -> SearchConfig -> IO ()
 expectMutuallyReachable lhs rhs subs config = do
-  expectReachable rhs (saturateUnderSubstitutions lhs subs config)
-  expectReachable lhs (saturateUnderSubstitutions rhs subs config)
+  let (lhsReachable, rhsReachable) = runEval $ do
+        l <- rpar (saturateUnderSubstitutions lhs subs config)
+        r <- rpar (saturateUnderSubstitutions rhs subs config)
+        _ <- rseq l
+        _ <- rseq r
+        return (l, r)
+  expectReachable rhs lhsReachable
+  expectReachable lhs rhsReachable
 
 expectSearchesIntersect :: Graph -> Graph -> [Substitution] -> SearchConfig -> IO ()
 expectSearchesIntersect lhs rhs subs config = do
@@ -1307,6 +1316,7 @@ existingIdenticalNodeMayBeReusedSpec =
             , (d0, transpose s0)
             , (mid, matMul d0 s0)
             , (out, matMul s0 mid)
+            , (t "od0", Output d0)
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
     expectReachable targetGraph
@@ -1385,6 +1395,7 @@ sharedInternalBothConsumersRewrittenShouldReachSpec =
             , (s0, mul x (sc "w"))
             , (s1, mul y (sc "w"))
             , (out, concatT a s0 s1)
+            , (side, Output x)
             ]
         axioms = [axiom28, axiom31, invertSubstitution axiom31]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
@@ -1495,6 +1506,7 @@ hangingConsumerWeirdStructuralShouldReachSpec =
             , (s0, transpose x)
             , (s1, transpose y)
             , (out, concatT axis1 s0 s1)
+            , (side, Output y)
             ]
         axioms = [axiom29, axiom35, invertSubstitution axiom35]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
@@ -1570,3 +1582,77 @@ cseBadWitnessReuseMultiInputShouldNotReachSpec =
         axioms = [axiom36, invertSubstitution axiom36]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
     expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
+
+split0ConcatFanoutWithDeadCodeCascadeReluSpec :: Spec
+split0ConcatFanoutWithDeadCodeCascadeReluSpec =
+  it "search: split0(concat(matmul,matmul)) with fanout to transpose+relu should collapse and dead-code-elim" $ do
+    let a0 = t "a0"
+        b0 = t "b0"
+        c0 = t "c0"
+        m0 = t "m0"
+        m1 = t "m1"
+        cat = t "cat"
+        sp = t "sp"
+        tr = t "tr"
+        rl = t "rl"
+        startGraph =
+          mustGraph
+            [ (a0, inp)
+            , (b0, inp)
+            , (c0, inp)
+            , (m0, matMul a0 b0)
+            , (m1, matMul b0 c0)
+            , (cat, concatT axis0 m0 m1)
+            , (sp, split0 axis0 cat)
+            , (tr, transpose sp)
+            , (rl, relu sp)
+            , (out, matMul tr rl)
+            ]
+        targetGraph =
+          mustGraph
+            [ (a0, inp)
+            , (b0, inp)
+            , (m0, matMul a0 b0)
+            , (tr, transpose m0)
+            , (rl, relu m0)
+            , (out, matMul tr rl)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph allSubs config)
+
+split0ConcatFanoutWithDeadCodeCascadeMatMulSpec :: Spec
+split0ConcatFanoutWithDeadCodeCascadeMatMulSpec =
+  it "search: split0(concat(matmul,matmul)) with fanout to transpose+matmul should collapse and dead-code-elim" $ do
+    let a0 = t "a0"
+        b0 = t "b0"
+        c0 = t "c0"
+        m0 = t "m0"
+        m1 = t "m1"
+        cat = t "cat"
+        sp = t "sp"
+        tr = t "tr"
+        mm = t "mm"
+        startGraph =
+          mustGraph
+            [ (a0, inp)
+            , (b0, inp)
+            , (c0, inp)
+            , (m0, matMul a0 b0)
+            , (m1, matMul b0 c0)
+            , (cat, concatT axis0 m0 m1)
+            , (sp, split0 axis0 cat)
+            , (tr, transpose sp)
+            , (mm, matMul sp a0)
+            , (out, matMul tr mm)
+            ]
+        targetGraph =
+          mustGraph
+            [ (a0, inp)
+            , (b0, inp)
+            , (m0, matMul a0 b0)
+            , (tr, transpose m0)
+            , (mm, matMul m0 a0)
+            , (out, matMul tr mm)
+            ]
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+    expectReachable targetGraph (saturateUnderSubstitutions startGraph allSubs config)

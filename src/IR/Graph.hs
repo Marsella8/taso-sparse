@@ -9,6 +9,8 @@ module IR.Graph
   , graphRefs
   , graphInputs
   , graphOutputs
+  , graphOutputNodes
+  , graphOutputRoots
   , graphInternals
   , graphMustLookup
   , graphWithoutKeys
@@ -17,6 +19,7 @@ module IR.Graph
   , graphUpdateBinding
   , graphAddBindings
   , gcMatchedImage
+  , deadCodeElim
   , cseGraph
   , varsInGraph
   , instantiateGraphTerms
@@ -39,12 +42,32 @@ mkGraph bindings = do
   guard (Map.size m == length bindings) -- no duplicate bindings
   guard (Set.null freeVars) -- no free variables
   guard (isAcyclic m)
-  Just g
+  Just (Graph (addOutputNodes m))
   where
     m = Map.fromList bindings
-    g = Graph m
-    allVars = Set.unions (Set.map tensorsInExpr $ graphExprs g) -- all used variables
-    freeVars = allVars Set.\\ graphTensorVars g
+    used = Map.keysSet m
+    usedTensors = Set.unions [tensorsInExpr e | e <- Map.elems m]
+    freeVars = usedTensors Set.\\ used
+
+addOutputNodes :: Map.Map Tensor Expr -> Map.Map Tensor Expr
+addOutputNodes m =
+  let used = Map.keysSet m
+      usedTensors = Set.unions [tensorsInExpr e | e <- Map.elems m]
+      unrefd = used Set.\\ usedTensors
+      nonOutputUnrefd = Set.filter (not . isOutputExpr . (m Map.!)) unrefd
+      outNames = zip (Set.toAscList nonOutputUnrefd) (freshOutputTensors used)
+  in foldl (\acc (val, nm) -> Map.insert nm (Output val) acc) m outNames
+  where
+    isOutputExpr (Output _) = True
+    isOutputExpr _ = False
+
+freshOutputTensors :: Set Tensor -> [Tensor]
+freshOutputTensors used =
+  [ t
+  | i <- [0 :: Int ..]
+  , let t = Tensor ("__o" ++ show i)
+  , Set.notMember t used
+  ]
 
 isAcyclic :: Map.Map Tensor Expr -> Bool
 isAcyclic m = go (Map.keys m) Set.empty Set.empty
@@ -102,16 +125,26 @@ graphRefs g = Set.unions (Set.map tensorsInExpr (graphExprs g))
 graphInputs :: Graph -> Set Tensor
 graphInputs g = Set.fromList [t | (t, Input) <- graphBindings g]
 
--- outputs are all the unused tensors
+graphOutputNodes :: Graph -> Set Tensor
+graphOutputNodes (Graph m) = Set.fromList [t | (t, Output _) <- Map.toList m]
+
+graphOutputRoots :: Graph -> Set Tensor
+graphOutputRoots g =
+  let outNodes = graphOutputNodes g
+  in if Set.null outNodes then graphOutputs g else outNodes
+
 graphOutputs :: Graph -> Set Tensor
-graphOutputs g =
-  graphTensorVars g Set.\\ usedTensors
+graphOutputs g@(Graph m) =
+  let explicitOuts = Set.fromList [v | (_, Output v) <- Map.toList m]
+  in if Set.null explicitOuts
+     then graphTensorVars g Set.\\ usedTensors
+     else explicitOuts
   where
     usedTensors = Set.unions (Set.map tensorsInExpr (graphExprs g))
 
 graphInternals :: Graph -> Set Tensor
 graphInternals g =
-  graphTensorVars g Set.\\ (graphInputs g `Set.union` graphOutputs g)
+  graphTensorVars g Set.\\ (graphInputs g `Set.union` graphOutputs g `Set.union` graphOutputNodes g)
 
 graphMustLookup :: Graph -> Tensor -> Expr
 graphMustLookup (Graph m) t = fromJust (Map.lookup t m)
@@ -139,6 +172,40 @@ gcMatchedImage candidates origOutputs graph =
   in if Set.null spurious
      then graph
      else gcMatchedImage candidates origOutputs (graphWithoutKeys spurious graph)
+
+deadCodeElim :: Graph -> Graph
+deadCodeElim g@(Graph m) =
+  let outPairs = [(t, v) | (t, Output v) <- Map.toList m]
+  in if null outPairs then g
+     else
+       let valCounts = foldl (\acc (_, v) -> Map.insertWith (+) v (1::Int) acc)
+                         Map.empty outPairs
+           duplicateOuts = Set.fromList
+             [ t
+             | (t, v) <- outPairs
+             , Map.findWithDefault 0 v valCounts > 1
+             , t /= minimum [t' | (t', v') <- outPairs, v' == v]
+             ]
+           redundant = duplicateOuts
+           cleaned = graphWithoutKeys redundant g
+           remainingOuts = Set.fromList
+             [t | (t, Output _) <- graphBindings cleaned]
+       in if Set.null remainingOuts then cleaned
+          else graphRestrictKeys (bfsReachable remainingOuts cleaned) cleaned
+
+bfsReachable :: Set Tensor -> Graph -> Set Tensor
+bfsReachable roots (Graph m) = go roots roots
+  where
+    go visited frontier
+      | Set.null frontier = visited
+      | otherwise =
+          let children = Set.unions
+                [ tensorsInExpr expr
+                | t <- Set.toList frontier
+                , Just expr <- [Map.lookup t m]
+                ]
+              newFrontier = children Set.\\ visited
+          in go (visited `Set.union` newFrontier) newFrontier
 
 cseGraph :: Graph -> Graph
 cseGraph g@(Graph m) =
@@ -193,8 +260,8 @@ canonicalizeGraph g =
     Just g' -> g'
     Nothing -> error "canonicalizeGraph: internal error"
   where
-    outputs = Set.toAscList (graphOutputs g)
-    (_, renameMap) = foldl visitTensor (0 :: Int, Map.empty) outputs
+    roots = Set.toAscList (graphOutputRoots g)
+    (_, renameMap) = foldl visitTensor (0 :: Int, Map.empty) roots
     reachable = Map.keysSet renameMap
     visitTensor (counter, rmap) tensor
       | Map.member tensor rmap = (counter, rmap)
@@ -209,6 +276,7 @@ tensorsInExprList :: Expr -> [Tensor]
 tensorsInExprList expr =
   case expr of
     Input -> []
+    Output a -> [a]
     Conv2D _ _ _ _ a b -> [a, b]
     Pool2DAvg _ _ _ a -> [a]
     Pool2DMax _ _ _ a -> [a]

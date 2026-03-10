@@ -63,7 +63,7 @@ graphTensorVarsSpec :: Spec
 graphTensorVarsSpec =
   it "graph: graph tensor vars" $ do
     let graphIn = mustGraph [(x, inp), (out, mul x (sc "w"))]
-        correct = Set.fromList [x, out]
+        correct = Set.fromList [x, out, t "__o0"]
         output = graphTensorVars graphIn
     output `shouldBe` correct
 

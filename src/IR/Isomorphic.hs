@@ -32,8 +32,8 @@ isomorphicGraphs lhs rhs
   | not (compatibleGraphShapes lhs rhs) = False
   | otherwise = any outputsWitness (permutations rhsOutputs)
   where
-    lhsOutputs = Set.toAscList (graphOutputs lhs)
-    rhsOutputs = Set.toAscList (graphOutputs rhs)
+    lhsOutputs = Set.toAscList (graphOutputRoots lhs)
+    rhsOutputs = Set.toAscList (graphOutputRoots rhs)
 
     outputsWitness rhsOutputPerm =
       case foldM matchOutput emptyIsoState (zip lhsOutputs rhsOutputPerm) of
@@ -47,7 +47,7 @@ compatibleGraphShapes :: Graph -> Graph -> Bool
 compatibleGraphShapes lhs rhs =
   Set.size (graphTensorVars lhs) == Set.size (graphTensorVars rhs)
     && Set.size (graphInputs lhs) == Set.size (graphInputs rhs)
-    && Set.size (graphOutputs lhs) == Set.size (graphOutputs rhs)
+    && Set.size (graphOutputRoots lhs) == Set.size (graphOutputRoots rhs)
     && varSortHistogram (varsInGraph lhs) == varSortHistogram (varsInGraph rhs)
 
 varSortHistogram :: Set.Set Var -> Map.Map Sort Int
@@ -77,6 +77,7 @@ matchExpr :: Graph -> Graph -> Expr -> Expr -> IsoState -> Maybe IsoState
 matchExpr lhs rhs lhsExpr rhsExpr state =
   case (lhsExpr, rhsExpr) of
     (Input, Input) -> pure state
+    (Output x1, Output x2) -> matchPair x1 x2 state
     (Conv2D k1 s1 p1 a1 x1 y1, Conv2D k2 s2 p2 a2 x2 y2) ->
       matchKernel2DTerms k1 k2 state
         >>= matchStride2DTerms s1 s2

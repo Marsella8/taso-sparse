@@ -198,6 +198,7 @@ ensureInputBindings requiredInputs bindings =
 
 parseExpr :: SExpr -> Maybe Expr
 parseExpr (SList [SAtom "input"]) = Just Input
+parseExpr (SList [SAtom "output", x]) = Output <$> fromSExpr x
 parseExpr (SList [SAtom "conv2d", k, s, p, a, x, y]) =
   Conv2D <$> fromSExpr k <*> fromSExpr s <*> fromSExpr p <*> fromSExpr a <*> fromSExpr x <*> fromSExpr y
 parseExpr (SList [SAtom "pool2d-avg", k, s, p, x]) =

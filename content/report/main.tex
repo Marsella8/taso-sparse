@@ -1,4 +1,5 @@
-\documentclass[sigplan,10pt,nonacm]{acmart}
+% Use draft for fast compile while editing; remove for final PDF
+\documentclass[draft,sigplan,10pt,nonacm]{acmart}
 
 \AtBeginDocument{%
   \providecommand\BibTeX{{Bib\TeX}}}
@@ -31,7 +32,6 @@ TODO: Add abstract (about 100--150 words).
 
 \section{Introduction}
 TODO
-
 \section{Motivation, Background, and Related Work}
 TODO (e.g., TASO~\cite{jia2019taso})
 
@@ -99,7 +99,7 @@ c) Remove graphs that became cycles.
 
 One of the main motivations for enforcing a bidireactioanl rewrite system, was, in addition to completeness, the follows:
 A nice property of a fully bidirectional rewrite system is that if we have an intermediate state s for which we have sound derivations src*->s and dst*->s, then we can invert the dst->s derivation and then chain it to obtain a sound src*->dst derivation (and viceversa).
-GIevn that we are doing combinanorial searhc, this makes the search significnatly faster. Suppose that src and dst are a minium of n rewirets apart, and that each state can be rewritten to x new states (and assue, for simplifty, that these strates had not been visited before). Then, to reach dst from src, we would need to visit at least x^n states (assuming BFS). With the bidirectional approach, we can however intitiate the search from both src and dst, and thus visit at most x^(n/2) states. (We explore until we discover a commomn state.)
+Given that we are doing combinanorial searhc, this makes the search significnatly faster. Suppose that src and dst are a minium of n rewirets apart, and that each state can be rewritten to x new states (and assue, for simplifty, that these strates had not been visited before). Then, to reach dst from src, we would need to visit at least $x^n$ states (assuming BFS). With the bidirectional approach, we can however intitiate the search from both src and dst, and thus visit at most $x^{n/2}$ states. (We explore until we discover a commomn state.)
 
 \section{Methodology and Results}
 TODO
@@ -109,9 +109,7 @@ TODO
 
 
 
-\subssection
-
-Case study: Tranpose(X) -> X
+\subsection{Case study: Transpose(X) -> X}
 
 Surprisignly, this test was initially failing. Turns out, that under the current axioms, the derivation was more complicated than intially anticipated:
 TO prove, we neede the following axioms:
