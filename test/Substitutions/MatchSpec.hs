@@ -1,14 +1,15 @@
 module Substitutions.MatchSpec where
 
-import Axioms (axiom29)
+import Control.Exception (evaluate)
+import Axioms (axiom28)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import IR.Graph (mustGraph)
 import IR.IR
 import Short
 import Substitutions.Match (Match(..), matchIsComplete, matchSubstitution)
-import Substitutions.Substitution (Substitution, invertSubstitution, mustSub, mustSubstitution)
-import Test.Hspec (Spec, it, shouldBe)
+import Substitutions.Substitution (Substitution, mustSub, mustSubstitution)
+import Test.Hspec (Spec, errorCall, it, shouldBe, shouldThrow)
 
 spec :: Spec
 spec = do
@@ -42,13 +43,9 @@ spec = do
   constConstructorsDoNotCrossMatchSpec
   completenessRejectsMissingTensorBindingSpec
   completenessRejectsMissingTermBindingSpec
-  multiOutputConcatSplitMatchesSpec
-  multiOutputConcatSplitMatchesConcreteAxisSpec
-  multiOutputNoMatchWhenOutputsMismatchSpec
-  multiOutputSharedInternalConsistencySpec
-  multiOutputTwoOutputsCannotMapToSameTensorSpec
-  inverseSplit1PackagingMatchesHiddenInputSiblingsSpec
-  inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec
+  multiOutputSubstitutionRejectedSpec
+  split0ConcatMatchesWhenInternalToTargetGraphSpec
+  split0ConcatMatchesWhenOperandsAreInternalMatmulsSpec
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
 matchOf tensorBindings termBindings =
@@ -406,9 +403,9 @@ completenessRejectsMissingTermBindingSpec =
 
 -- Multi-output tests
 
-multiOutputConcatSplitMatchesSpec :: Spec
-multiOutputConcatSplitMatchesSpec =
-  it "match: multi-output concat-split pattern matches correctly" $ do
+multiOutputSubstitutionRejectedSpec :: Spec
+multiOutputSubstitutionRejectedSpec =
+  it "match: substitutions with multiple source outputs are rejected" $ do
     let sub = mustSubstitution
               [ (x, inp), (y, inp)
               , (s0, concatT a x y)
@@ -427,141 +424,49 @@ multiOutputConcatSplitMatchesSpec =
             , (o0, split0 axis0 s0)
             , (o1, split1 axis0 s0)
             ]
-        correct =
-          Set.singleton
-            (matchOf
-              [ (x, x), (y, y), (s0, s0), (o0, o0), (o1, o1) ]
-              [ (axisVar "a", AxisTm axis0) ])
-        output = matchSubstitution sub targetGraph
-    output `shouldBe` correct
+    evaluate (Set.size (matchSubstitution sub targetGraph))
+      `shouldThrow` errorCall "matchSubstitution: substitutions with multiple source outputs are unsupported"
 
-multiOutputConcatSplitMatchesConcreteAxisSpec :: Spec
-multiOutputConcatSplitMatchesConcreteAxisSpec =
-  it "match: multi-output concat-split matches with axis1 in the target" $ do
-    let sub = mustSubstitution
-              [ (x, inp), (y, inp)
-              , (s0, concatT a x y)
-              , (o0, split0 a s0)
-              , (o1, split1 a s0)
-              ]
-              [ (x, inp), (y, inp) ]
-              [(x, x), (y, y)]
-              []
-              [(o0, x), (o1, y)]
-        targetGraph =
-          mustGraph
-            [ (t "a", inp)
-            , (t "b", inp)
-            , (t "c", concatT axis1 (t "a") (t "b"))
-            , (t "p", split0 axis1 (t "c"))
-            , (t "q", split1 axis1 (t "c"))
-            ]
-        correct =
-          Set.singleton
-            (matchOf
-              [ (x, t "a"), (y, t "b"), (s0, t "c"), (o0, t "p"), (o1, t "q") ]
-              [ (axisVar "a", AxisTm axis1) ])
-        output = matchSubstitution sub targetGraph
-    output `shouldBe` correct
-
-multiOutputNoMatchWhenOutputsMismatchSpec :: Spec
-multiOutputNoMatchWhenOutputsMismatchSpec =
-  it "match: multi-output pattern fails when one output has wrong expression" $ do
-    let sub = mustSubstitution
-              [ (x, inp), (y, inp)
-              , (s0, concatT a x y)
-              , (o0, split0 a s0)
-              , (o1, split1 a s0)
-              ]
-              [ (x, inp), (y, inp) ]
-              [(x, x), (y, y)]
-              []
-              [(o0, x), (o1, y)]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (s0, concatT axis0 x y)
-            , (o0, split0 axis0 s0)
-            , (o1, relu s0)
-            ]
-        output = matchSubstitution sub targetGraph
-    output `shouldBe` Set.empty
-
-multiOutputSharedInternalConsistencySpec :: Spec
-multiOutputSharedInternalConsistencySpec =
-  it "match: multi-output outputs sharing an internal must bind it consistently" $ do
-    let sub = mustSubstitution
-              [ (x, inp), (y, inp)
-              , (s0, concatT a x y)
-              , (o0, split0 a s0)
-              , (o1, split1 a s0)
-              ]
-              [ (x, inp), (y, inp) ]
-              [(x, x), (y, y)]
-              []
-              [(o0, x), (o1, y)]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (s0, concatT axis0 x y)
-            , (s1, concatT axis1 x y)
-            , (o0, split0 axis0 s0)
-            , (o1, split1 axis1 s1)
-            ]
-        output = matchSubstitution sub targetGraph
-    output `shouldBe` Set.empty
-
-multiOutputTwoOutputsCannotMapToSameTensorSpec :: Spec
-multiOutputTwoOutputsCannotMapToSameTensorSpec =
-  it "match: two distinct source outputs cannot map to the same target tensor" $ do
-    let sub = mustSubstitution
-              [ (x, inp), (y, inp)
-              , (s0, concatT a x y)
-              , (o0, split0 a s0)
-              , (o1, split1 a s0)
-              ]
-              [ (x, inp), (y, inp) ]
-              [(x, x), (y, y)]
-              []
-              [(o0, x), (o1, y)]
-        targetGraph =
+split0ConcatMatchesWhenInternalToTargetGraphSpec :: Spec
+split0ConcatMatchesWhenInternalToTargetGraphSpec =
+  it "match: split0(concat(x,y)) matches even when the split result is internal to the target graph" $ do
+    let targetGraph =
           mustGraph
             [ (x, inp)
             , (y, inp)
             , (s0, concatT axis0 x y)
             , (out, split0 axis0 s0)
+            , (z, relu out)
             ]
-        output = matchSubstitution sub targetGraph
-    output `shouldBe` Set.empty
+        correct =
+          Set.singleton
+            (matchOf
+              [ (x, x), (y, y), (s0, s0), (out, out) ]
+              [ (axisVar "a", AxisTm axis0) ])
+        output = matchSubstitution axiom28 targetGraph
+    output `shouldBe` correct
 
-inverseSplit1PackagingMatchesHiddenInputSiblingsSpec :: Spec
-inverseSplit1PackagingMatchesHiddenInputSiblingsSpec =
-  it "match: inverse split1 packaging can match hidden graph inputs feeding an existing concat" $ do
-    let sub = invertSubstitution axiom29
+split0ConcatMatchesWhenOperandsAreInternalMatmulsSpec :: Spec
+split0ConcatMatchesWhenOperandsAreInternalMatmulsSpec =
+  it "match: split0(concat(x,y)) matches when x and y are internal matmuls" $ do
+    let a0 = t "a0"
+        b0 = t "b0"
+        c0 = t "c0"
         targetGraph =
           mustGraph
-            [ (t "r0", inp)
-            , (t "r1", inp)
-            , (t "r2", concatT a (t "r0") (t "r1"))
-            , (x, split0 a (t "r2"))
+            [ (a0, inp)
+            , (b0, inp)
+            , (c0, inp)
+            , (x, matMul a0 b0)
+            , (y, matMul b0 c0)
+            , (s0, concatT axis0 x y)
+            , (out, split0 axis0 s0)
+            , (z, relu out)
             ]
-        output = matchSubstitution sub targetGraph
-    Set.member (matchOf [(x, t "r0"), (y, t "r1")] []) output `shouldBe` True
-
-inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec :: Spec
-inverseSplit1PackagingMatchesHiddenInternalSiblingsSpec =
-  it "match: inverse split1 packaging can match hidden internal siblings feeding an existing concat" $ do
-    let sub = invertSubstitution axiom29
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (t "r0", relu x)
-            , (t "r1", relu y)
-            , (t "r2", concatT a (t "r0") (t "r1"))
-            , (s0, split0 a (t "r2"))
-            ]
-        output = matchSubstitution sub targetGraph
-    Set.member (matchOf [(x, t "r0"), (y, t "r1")] []) output `shouldBe` True
+        correct =
+          Set.singleton
+            (matchOf
+              [ (x, x), (y, y), (s0, s0), (out, out) ]
+              [ (axisVar "a", AxisTm axis0) ])
+        output = matchSubstitution axiom28 targetGraph
+    output `shouldBe` correct

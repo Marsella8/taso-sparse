@@ -11,9 +11,32 @@ import IR.IR
 import Substitutions.Match (Match(..), matchSubstitution, matchIsComplete, matchIsWellSorted)
 import Substitutions.Substitution (Substitution(..))
 
+requireSingleSourceOutput :: String -> Substitution -> Tensor
+requireSingleSourceOutput context sub =
+  case Set.toAscList (graphOutputs (subSrc sub)) of
+    [srcOut] -> srcOut
+    _ ->
+      error (context ++ ": substitutions with multiple source outputs are unsupported")
+
+requireSingleMappedOutput :: String -> Substitution -> (Tensor, Tensor)
+requireSingleMappedOutput context sub =
+  case Bi.toList (subOutputMap sub) of
+    [(srcOut, dstOut)] -> (srcOut, dstOut)
+    _ ->
+      error (context ++ ": substitutions must have exactly one mapped output")
+
+requireSupportedOutputPair :: String -> Substitution -> (Tensor, Tensor)
+requireSupportedOutputPair context sub =
+  let onlySrcOut = requireSingleSourceOutput context sub
+      (mappedSrcOut, dstOut) = requireSingleMappedOutput context sub
+  in if onlySrcOut == mappedSrcOut
+       then (onlySrcOut, dstOut)
+       else error (context ++ ": output map does not match the only source output")
+
 applySubstitution :: Graph -> Substitution -> Set.Set Graph
 applySubstitution target sub =
-  Set.fromList $ concatMap (\m -> applyMatchedSubstitution target sub m) matches
+  case requireSupportedOutputPair "applySubstitution" sub of
+    _ -> Set.fromList $ concatMap (\m -> applyMatchedSubstitution target sub m) matches
   where
     matches = Set.toList (matchSubstitution sub target)
 
@@ -22,9 +45,9 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
   guard (matchIsComplete (subSrc sub) match && matchIsWellSorted match)
   let srcGraph = subSrc sub
       dstGraph = subDst sub
+      (srcOut, dstOut) = requireSupportedOutputPair "applyMatchedSubstitution" sub
       srcImage = Set.map (mt match) (graphTensorVars srcGraph)
       inputImage = Set.map (mt match) (graphInputs srcGraph)
-      (srcOut, dstOut) = head (Bi.toList (subOutputMap sub))
       matchedTarget = mt match srcOut
       isPassThrough = Set.member dstOut (graphInputs dstGraph)
       consumers = [ (c, graphMustLookup target c)
@@ -43,20 +66,19 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
       dstCore = graphWithoutKeys (graphInputs instDst) instDst
       srcOutIsSrcInput = Set.member srcOut (graphInputs srcGraph)
   if isPassThrough
-    then applyPassThrough target sub match matchedTarget consumers origOutputs gcScope
+    then applyPassThrough target sub match dstOut matchedTarget consumers origOutputs gcScope
     else if srcOutIsSrcInput && not (null consumers)
-      then applyOccurrenceLocal target sub match instDst dstCore matchedTarget
+      then applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
              consumers origOutputs gcScope
-      else applyRedefine target sub match instDst dstCore matchedTarget
+      else applyRedefine target sub match dstOut instDst dstCore matchedTarget
              origOutputs gcScope
 
 applyPassThrough
-  :: Graph -> Substitution -> Match -> Tensor
+  :: Graph -> Substitution -> Match -> Tensor -> Tensor
   -> [(Tensor, Expr)] -> Set.Set Tensor -> Set.Set Tensor
   -> Maybe [Graph]
-applyPassThrough target sub match matchedTarget consumers origOutputs gcScope = do
-  let (_, dstOut) = head (Bi.toList (subOutputMap sub))
-      srcIn = case Bi.lookupR dstOut (subInputMap sub) of
+applyPassThrough target sub match dstOut matchedTarget consumers origOutputs gcScope = do
+  let srcIn = case Bi.lookupR dstOut (subInputMap sub) of
         Just s -> s
         Nothing -> error "pass-through output not found in input map"
       redirectTo = mt match srcIn
@@ -82,13 +104,12 @@ applyPassThrough target sub match matchedTarget consumers origOutputs gcScope = 
         Just []
 
 applyRedefine
-  :: Graph -> Substitution -> Match -> Graph -> Graph -> Tensor
+  :: Graph -> Substitution -> Match -> Tensor -> Graph -> Graph -> Tensor
   -> Set.Set Tensor -> Set.Set Tensor
   -> Maybe [Graph]
-applyRedefine target sub match instDst dstCore matchedTarget
+applyRedefine target sub match dstOut instDst dstCore matchedTarget
   origOutputs gcScope = do
-  let (_, dstOut) = head (Bi.toList (subOutputMap sub))
-      inputRename0 = Map.fromList
+  let inputRename0 = Map.fromList
         [ (dt, mt match st)
         | (st, dt) <- Bi.toList (subInputMap sub)
         ]
@@ -126,13 +147,12 @@ applyRedefine target sub match instDst dstCore matchedTarget
   Just [result]
 
 applyOccurrenceLocal
-  :: Graph -> Substitution -> Match -> Graph -> Graph -> Tensor
+  :: Graph -> Substitution -> Match -> Tensor -> Graph -> Graph -> Tensor
   -> [(Tensor, Expr)] -> Set.Set Tensor -> Set.Set Tensor
   -> Maybe [Graph]
-applyOccurrenceLocal target sub match instDst dstCore matchedTarget
+applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
   consumers origOutputs gcScope = do
-  let (_, dstOut) = head (Bi.toList (subOutputMap sub))
-      inputRename0 = Map.fromList
+  let inputRename0 = Map.fromList
         [ (dt, mt match st)
         | (st, dt) <- Bi.toList (subInputMap sub)
         ]

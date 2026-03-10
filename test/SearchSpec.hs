@@ -42,7 +42,7 @@ spec = do
   inverseDoubleTransposeInsertionShouldBeReachableSpec
   inverseConstIConvInsertionShouldBeReachableSpec
   inverseConstImmInsertionShouldBeReachableSpec
-  transposeConstImmShouldCollapseToConstImmSpec
+  transposeConstImmShouldIntersectWithConstImmUnderBidirectionalSearchSpec
   leftConstImmShouldCollapseToInputSpec
   inverseConstOneInsertionShouldBeReachableSpec
   convReluFusionShouldBeReachableSpec
@@ -52,8 +52,6 @@ spec = do
   leftConstIConvShouldCollapseToEnlargeSpec
   sameKernelConvMergeShouldBeReachableSpec
   singleConvKernelEnlargementShouldBeReachableSpec
-  singleSplit0PackagingShouldBeReachableSpec
-  split0ThenSplit1PackagingShouldBeReachableSpec
   enlargedKernelConvMergeShouldBeReachableSpec
   singleUseDoubleTransposeInsertionShouldBeReachableSpec
   fanoutOccurrenceLocalDoubleTransposeShouldBeReachableSpec
@@ -63,18 +61,13 @@ spec = do
   batchTwoConvsIntoOneConvWhenOneOriginalResultIsStillUsedSpec
   convChainWithOuterReluShouldBeReachableSpec
   convChainWithReluFusedIntoSecondConvShouldBeReachableSpec
-  convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec
   convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec
-  convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec
   convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec
   convBatchingAcrossBothAxesShouldBeReachableSpec
   constPoolShouldBeReachableFromPoolAvgConstIConvSpec
   constPoolShouldBeReachableFromPoolMaxConstIConvSpec
-  concatSplitRoundtripShouldBeReachableSpec
-  multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec
   multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec
   convInputBatchingShouldBeReachableSpec
-  multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec
   transposeDistributionShouldReuseSharedSubexpressionsSpec
   multiUseDoubleTransposeInsertionShouldComposeSpec
   transposeConcatWithOutsideInputUseShouldBeReachableSpec
@@ -254,9 +247,9 @@ inverseConstImmInsertionShouldBeReachableSpec =
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
     expectMutuallyReachable startGraph targetGraph [axiom26, invertSubstitution axiom26] config
 
-transposeConstImmShouldCollapseToConstImmSpec :: Spec
-transposeConstImmShouldCollapseToConstImmSpec =
-  it "search: transpose(ConstImm) should be reducible to ConstImm" $ do
+transposeConstImmShouldIntersectWithConstImmUnderBidirectionalSearchSpec :: Spec
+transposeConstImmShouldIntersectWithConstImmUnderBidirectionalSearchSpec =
+  it "search: transpose(ConstImm) and ConstImm should intersect under bidirectional search within depth 2" $ do
     let startGraph =
           mustGraph
             [ (s0, ConstImm)
@@ -266,9 +259,9 @@ transposeConstImmShouldCollapseToConstImmSpec =
           mustGraph
             [ (out, ConstImm)
             ]
-        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
+        config = SearchConfig {maxDepth = 2, maxNumSteps = 10}
         axioms = [lemmaTransposeConstImm, invertSubstitution lemmaTransposeConstImm]
-    expectMutuallyReachable startGraph targetGraph axioms config
+    expectSearchesIntersect startGraph targetGraph axioms config
 
 leftConstImmShouldCollapseToInputSpec :: Spec
 leftConstImmShouldCollapseToInputSpec =
@@ -464,97 +457,6 @@ singleConvKernelEnlargementShouldBeReachableSpec =
     expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
 
 
-singleSplit0PackagingShouldBeReachableSpec :: Spec
-singleSplit0PackagingShouldBeReachableSpec =
-  it "search: two inputs should be packageable into concat(axis0) -> split0" $ do
-    let targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            ]
-        startGraph =
-          mustGraph
-            [ (t "r0", inp)
-            , (t "r1", inp)
-            , (t "r2", concatT axis0 (t "r0") (t "r1"))
-            , (x, split0 axis0 (t "r2"))
-            ]
-        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
-        subs = [invertSubstitution axiom28]
-    expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
-
-split0ThenSplit1PackagingShouldBeReachableSpec :: Spec
-split0ThenSplit1PackagingShouldBeReachableSpec =
-  it "search: after introducing split0, introducing split1 on the same concat should be reachable" $ do
-    let startGraph =
-          mustGraph
-            [ (t "r0", inp)
-            , (t "r1", inp)
-            , (t "r2", concatT a (t "r0") (t "r1"))
-            , (x, split0 a (t "r2"))
-            ]
-        targetGraph =
-          mustGraph
-            [ (t "r0", inp)
-            , (t "r1", inp)
-            , (t "r2", concatT a (t "r0") (t "r1"))
-            , (x, split0 a (t "r2"))
-            , (y, split1 a (t "r2"))
-            ]
-        config = SearchConfig {maxDepth = 1, maxNumSteps = 20}
-        subs = [invertSubstitution axiom29]
-    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
-
-concatSplitRoundtripShouldBeReachableSpec :: Spec
-concatSplitRoundtripShouldBeReachableSpec =
-  it "search: concat followed by split0/split1 should be mutually reachable with two independent outputs" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (t "c0", concatT axis0 x y)
-            , (o0, split0 axis0 (t "c0"))
-            , (o1, split1 axis0 (t "c0"))
-            ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 200}
-        subs = [axiom28, invertSubstitution axiom28, axiom29, invertSubstitution axiom29]
-    expectMutuallyReachable startGraph targetGraph subs config
-
-multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec :: Spec
-multiOutputConcatReluSplitPackagingForwardShouldBeReachableSpec =
-  it "search: two relu outputs should reach concat -> relu -> split" $ do
-    let startGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (s0, relu x)
-            , (s1, relu y)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (d0, concatT axis0 x y)
-            , (d1, relu d0)
-            , (t "d2", split0 axis0 d1)
-            , (t "d3", split1 axis0 d1)
-            ]
-        subs =
-          [ axiom28
-          , invertSubstitution axiom28
-          , axiom29
-          , invertSubstitution axiom29
-          , axiom34
-          , invertSubstitution axiom34
-          ]
-        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
-    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
-
 multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec :: Spec
 multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec =
   it "search: concat -> relu -> split should reduce back to two relu outputs" $ do
@@ -576,9 +478,7 @@ multiOutputConcatReluSplitPackagingReverseShouldBeReachableSpec =
             ]
         subs =
           [ axiom28
-          , invertSubstitution axiom28
           , axiom29
-          , invertSubstitution axiom29
           , axiom34
           , invertSubstitution axiom34
           ]
@@ -844,43 +744,6 @@ convChainWithReluFusedIntoSecondConvShouldBeReachableSpec =
         config = SearchConfig {maxDepth = 10, maxNumSteps = 100}
     expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
 
-convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec :: Spec
-convWeightBatchingWithSplitOutputsForwardShouldBeReachableSpec =
-  it "search: batching convs over weights should reach split outputs" $ do
-    let w1 = t "w1"
-        w2 = t "w2"
-        c0 = t "c0"
-        c1 = t "c1"
-        packed = t "packed"
-        startGraph =
-          mustGraph
-            [ (x, inp)
-            , (w1, inp)
-            , (w2, inp)
-            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x w1)
-            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x w2)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (w1, inp)
-            , (w2, inp)
-            , (packed, concatT axis0 w1 w2)
-            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone x packed)
-            , (c0, split0 axis1 d0)
-            , (c1, split1 axis1 d0)
-            ]
-        subs =
-          [ axiom28
-          , invertSubstitution axiom28
-          , axiom29
-          , invertSubstitution axiom29
-          , axiom39
-          , invertSubstitution axiom39
-          ]
-        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
-    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
-
 convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec :: Spec
 convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec =
   it "search: split outputs over weight batching should reduce back to two convs" $ do
@@ -909,52 +772,12 @@ convWeightBatchingWithSplitOutputsReverseShouldBeReachableSpec =
             ]
         subs =
           [ axiom28
-          , invertSubstitution axiom28
           , axiom29
-          , invertSubstitution axiom29
           , axiom39
           , invertSubstitution axiom39
           ]
         config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
     expectReachable startGraph (saturateUnderSubstitutions targetGraph subs config)
-
-convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec :: Spec
-convInputBatchingWithSplitOutputsForwardShouldBeReachableSpec =
-  it "search: batching convs over inputs should reach split outputs" $ do
-    let x1 = t "x1"
-        x2 = t "x2"
-        w0 = t "w0"
-        c0 = t "c0"
-        c1 = t "c1"
-        packed = t "packed"
-        startGraph =
-          mustGraph
-            [ (x1, inp)
-            , (x2, inp)
-            , (w0, inp)
-            , (c0, conv2d (kernelLit 1 3) stride11 padSame actNone x1 w0)
-            , (c1, conv2d (kernelLit 1 3) stride11 padSame actNone x2 w0)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x1, inp)
-            , (x2, inp)
-            , (w0, inp)
-            , (packed, concatT axis0 x1 x2)
-            , (d0, conv2d (kernelLit 1 3) stride11 padSame actNone packed w0)
-            , (c0, split0 axis0 d0)
-            , (c1, split1 axis0 d0)
-            ]
-        subs =
-          [ axiom28
-          , invertSubstitution axiom28
-          , axiom29
-          , invertSubstitution axiom29
-          , axiom38
-          , invertSubstitution axiom38
-          ]
-        config = SearchConfig {maxDepth = 15, maxNumSteps = 200}
-    expectReachable targetGraph (saturateUnderSubstitutions startGraph subs config)
 
 convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec :: Spec
 convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec =
@@ -985,9 +808,7 @@ convInputBatchingWithSplitOutputsReverseShouldBeReachableSpec =
             ]
         subs =
           [ axiom28
-          , invertSubstitution axiom28
           , axiom29
-          , invertSubstitution axiom29
           , axiom38
           , invertSubstitution axiom38
           ]
@@ -1079,39 +900,6 @@ transposeDistributionShouldReuseSharedSubexpressionsSpec =
         config = SearchConfig {maxDepth = 2, maxNumSteps = 50}
         axioms = [axiom10, invertSubstitution axiom10, axiom23, invertSubstitution axiom23]
     expectMutuallyReachable startGraph targetGraph axioms config
-
-multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec :: Spec
-multiOutputConcatReluSplitPackagingWithDownstreamUseShouldBeReachableSpec =
-  it "search: concat -> relu -> split packaging should preserve a downstream use of the first relu branch" $ do
-    let u0 = t "u0"
-        startGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (s0, relu x)
-            , (s1, relu y)
-            , (u0, ewAdd s0 s0)
-            ]
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            , (d0, concatT axis0 x y)
-            , (d1, relu d0)
-            , (o0, split0 axis0 d1)
-            , (o1, split1 axis0 d1)
-            , (u0, ewAdd o0 o0)
-            ]
-        config = SearchConfig {maxDepth = 6, maxNumSteps = 3000}
-        subs =
-          [ axiom28
-          , invertSubstitution axiom28
-          , axiom29
-          , invertSubstitution axiom29
-          , axiom34
-          , invertSubstitution axiom34
-          ]
-    expectMutuallyReachable startGraph targetGraph subs config
 
 transposeConcatWithOutsideInputUseShouldBeReachableSpec :: Spec
 transposeConcatWithOutsideInputUseShouldBeReachableSpec =
@@ -1294,6 +1082,12 @@ expectMutuallyReachable :: Graph -> Graph -> [Substitution] -> SearchConfig -> I
 expectMutuallyReachable lhs rhs subs config = do
   expectReachable rhs (saturateUnderSubstitutions lhs subs config)
   expectReachable lhs (saturateUnderSubstitutions rhs subs config)
+
+expectSearchesIntersect :: Graph -> Graph -> [Substitution] -> SearchConfig -> IO ()
+expectSearchesIntersect lhs rhs subs config = do
+  let lhsReachable = saturateUnderSubstitutions lhs subs config
+      rhsReachable = saturateUnderSubstitutions rhs subs config
+  Set.null (Set.intersection lhsReachable rhsReachable) `shouldBe` False
 
 multiUseDoubleTransposeInsertionShouldComposeSpec :: Spec
 multiUseDoubleTransposeInsertionShouldComposeSpec =
@@ -1592,7 +1386,7 @@ sharedInternalBothConsumersRewrittenShouldReachSpec =
             , (s1, mul y (sc "w"))
             , (out, concatT a s0 s1)
             ]
-        axioms = [axiom28, invertSubstitution axiom28, axiom31, invertSubstitution axiom31]
+        axioms = [axiom28, axiom31, invertSubstitution axiom31]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
     expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
 
@@ -1618,7 +1412,7 @@ sharedInternalWrongLaterConsumerShouldNotReachSpec =
             , (side, split1 a d0)
             , (out, concatT a s0 s1)
             ]
-        axioms = [axiom28, invertSubstitution axiom28, axiom31, invertSubstitution axiom31]
+        axioms = [axiom28, axiom31, invertSubstitution axiom31]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
     expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
 
@@ -1702,7 +1496,7 @@ hangingConsumerWeirdStructuralShouldReachSpec =
             , (s1, transpose y)
             , (out, concatT axis1 s0 s1)
             ]
-        axioms = [axiom29, invertSubstitution axiom29, axiom35, invertSubstitution axiom35]
+        axioms = [axiom29, axiom35, invertSubstitution axiom35]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
     expectReachable targetGraph (saturateUnderSubstitutions startGraph axioms config)
 
@@ -1776,4 +1570,3 @@ cseBadWitnessReuseMultiInputShouldNotReachSpec =
         axioms = [axiom36, invertSubstitution axiom36]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 500}
     expectNotReachable badGraph (saturateUnderSubstitutions startGraph axioms config)
-

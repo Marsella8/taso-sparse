@@ -1,7 +1,6 @@
 module Substitutions.Match where
 
 import Data.Maybe (mapMaybe)
-import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import IR.Graph
@@ -47,32 +46,29 @@ matchIsComplete srcGraph (Match tensorMap termMap) =
   graphTensorVars srcGraph == Map.keysSet tensorMap &&
   varsInGraph srcGraph == Map.keysSet termMap
 
+requireSingleSourceOutput :: String -> Substitution -> Tensor
+requireSingleSourceOutput context sub =
+  case Set.toAscList (graphOutputs (subSrc sub)) of
+    [srcOut] -> srcOut
+    _ ->
+      error (context ++ ": substitutions with multiple source outputs are unsupported")
+
 matchSubstitution :: Substitution -> Graph -> Set.Set Match
 matchSubstitution sub targetGraph =
   Set.filter isValidMatch allMatches
   where
     srcGraph = subSrc sub
-    srcOuts = Set.toAscList (graphOutputs srcGraph)
-    targetOuts = Set.toList (graphOutputs targetGraph)
+    srcOut = requireSingleSourceOutput "matchSubstitution" sub
     targetAll = Set.toList (graphTensorVars targetGraph)
-    multiOutput = length srcOuts > 1
 
     isValidMatch match =
       matchIsWellSorted match &&
-      matchIsComplete srcGraph match &&
-      outputsInjective match
-
-    outputsInjective match =
-      let mappedOuts = map (\so -> matchTensorMap match Map.! so) srcOuts
-      in length mappedOuts == Set.size (Set.fromList mappedOuts)
+      matchIsComplete srcGraph match
 
     allMatches = Set.fromList $
-      foldl' expandWithOutput [emptyMatch] srcOuts
-
-    candidates = if multiOutput then targetOuts else targetAll
-
-    expandWithOutput partials srcOut =
-      concatMap (\m -> mapMaybe (\tgt -> matchTensors srcGraph targetGraph srcOut tgt m) candidates) partials
+      mapMaybe
+        (\targetOut -> matchTensors srcGraph targetGraph srcOut targetOut emptyMatch)
+        targetAll
 
 matchTensors :: Graph -> Graph -> Tensor -> Tensor -> Match -> Maybe Match
 matchTensors srcGraph targetGraph srcTensor targetTensor partialMatch = do

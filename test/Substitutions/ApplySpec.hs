@@ -1,5 +1,6 @@
 module Substitutions.ApplySpec where
 
+import Control.Exception (evaluate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import IR.Graph (mustGraph)
@@ -9,7 +10,7 @@ import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
 import Axioms (axiom9, axiom28, axiom29)
 import Substitutions.Substitution (mustSub, invertSubstitution)
-import Test.Hspec (Spec, it, shouldBe)
+import Test.Hspec (Spec, errorCall, it, shouldBe, shouldThrow)
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
 matchOf tensorBindings termBindings =
@@ -69,9 +70,8 @@ spec = do
   split0ConcatReducesToFirstArgSpec
   split1ConcatReducesToSecondArgSpec
   split0ConcatWithDownstreamUsersSpec
-  inverseSplit0IntroducesConcatSplitSpec
   split0ConcatViaApplySubstitutionSpec
-  inverseAxiom28SoundnessSpec
+  multiOutputSourceSubstitutionRejectedSpec
   inverseDoubleTransposeOccurrenceLocalSpec
 
 split0ConcatReducesToFirstArgSpec :: Spec
@@ -157,18 +157,6 @@ split0ConcatWithDownstreamUsersSpec =
         output = applyMatchedSubstitution targetGraph axiom28 match
     output `shouldBe` correct
 
-inverseSplit0IntroducesConcatSplitSpec :: Spec
-inverseSplit0IntroducesConcatSplitSpec =
-  it "apply: inverse of axiom28 wraps two inputs in concat+split0" $ do
-    let inv28 = invertSubstitution axiom28
-        targetGraph =
-          mustGraph
-            [ (x, inp)
-            , (y, inp)
-            ]
-        output = applySubstitution targetGraph inv28
-    (Set.size output > 0) `shouldBe` True
-
 split0ConcatViaApplySubstitutionSpec :: Spec
 split0ConcatViaApplySubstitutionSpec =
   it "apply: applySubstitution finds and applies axiom28 on a matching graph" $ do
@@ -182,17 +170,17 @@ split0ConcatViaApplySubstitutionSpec =
         output = applySubstitution targetGraph axiom28
     Set.size output `shouldBe` 1
 
-inverseAxiom28SoundnessSpec :: Spec
-inverseAxiom28SoundnessSpec =
-  it "soundness: inverse axiom28 should not match when target has fewer outputs than source" $ do
+multiOutputSourceSubstitutionRejectedSpec :: Spec
+multiOutputSourceSubstitutionRejectedSpec =
+  it "apply: substitutions with multiple source outputs are rejected" $ do
     let inv28 = invertSubstitution axiom28
         targetGraph =
           mustGraph
             [ (x, inp)
-            , (y, relu x)
+            , (y, inp)
             ]
-        results = applySubstitution targetGraph inv28
-    Set.size results `shouldBe` 0
+    evaluate (Set.size (applySubstitution targetGraph inv28))
+      `shouldThrow` errorCall "applySubstitution: substitutions with multiple source outputs are unsupported"
 
 nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
 nonInjectiveInternalMatchProducesCorrectResultSpec =

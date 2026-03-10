@@ -29,13 +29,6 @@ TODO: Add abstract (about 100--150 words).
 
 \maketitle
 
-% Target length guidance for a 4-page report:
-% Introduction: 0.5 pages
-% Motivation/Background/Related Work: 0.5 pages
-% Approach/Implementation: 1.5 pages
-% Methodology/Results: 1 page
-% Discussion/Limitations/Next Steps: 0.5 pages
-
 \section{Introduction}
 TODO
 
@@ -47,7 +40,9 @@ TODO (e.g., TASO~\cite{jia2019taso})
 \subsection{Axioms}
 The axioms are strucutred this and that way.
 EXAMPLE WITH PICTURE
-\subsection{Substitution Engine}
+
+
+\subsection{Substitution Matching}
 The matching is done by initially matching the ouput tensor of the source of the axiom graph with a tensor of the output graph.
 We then recursively match accoring to the following rules. For a given pair of nodes:
 - If both are input...
@@ -56,9 +51,32 @@ We then recursively match accoring to the following rules. For a given pair of n
 - If neither is input, then they must be the same expression: we then recurively match on their subexpressions.
 (We propagate a partial state as we go along).
 
+\subsection{Substitution Application}
 
-However, we still have that... To address this, we perform common subexpression elimination after each rewrite.
+Our application has several constraints that it must satisfy:
+1) Possible surjective matching. That is:
+  Given the substiutiton matmul(x.T, y.T) -> matmul(x,y).T, we should be able to apply it to the graph matmul(a.T, a.T). i.e. x->a and y->a.
+2) A given pattern must be abe to match any subgraph.
+  for example, x.T.T should be albe to be applied even if x is not an input of x.T.T is not the output.
+3) Must handle graphs that have multiple outputs (but not substitutions that have multiple outputs).
 
+4) It must be possible that the substitution causes an input and an output tensor to be matched into one. For example, given the sibstitution x.T.T ->x, we must be able to apply it to the following graph:
+x = input()
+y = x.T
+z = y.T
+w = relu(z)
+
+and get the following graph:
+
+x = input()
+w = relu(x)
+
+5) Remove common subexpressions
+
+6) Remove unused tensors (except inputs and outputs).
+
+7) Allow for occurrence based rewriting.
+For example, given matmul(x,x), the system should be able to rewrite to matmul(x,x.T.T) (ie. only one application of x has been rewritten, so not the node).
 \subsection{Proof Search}
 
 One of the main motivations for enforcing a bidireactioanl rewrite system, was, in addition to completeness, the follows:
@@ -90,7 +108,8 @@ transpose(matmul(transpose(I), I))            [invertSubstitution axiom16]
 transpose(transpose(I))                       [axiom26]
 I                                             [axiom9]
 
-TODO: add bidirectional BFS search map under these 3 axioms and show the intersection.
+TODO: add bidirectional BFS search diagram under these 3 axioms and show the intersection.
+
 
 Analogously, we have for matmul(I, x) -> x:
 
@@ -111,4 +130,4 @@ Surprisignly, the TASO team converged on the same problem, and added Tranpose(X)
 
 \end{document}
 
---TODO: figure out if approaching from both directions is the right thing to do.
+TODO: right now multi output matching only targets output tensors in the target graph, bad!!!
