@@ -43,7 +43,7 @@ matchIsWellSorted (Match _ termMap) =
 
 matchIsComplete :: Graph -> Match -> Bool
 matchIsComplete srcGraph (Match tensorMap termMap) =
-  graphTensorVars srcGraph == Map.keysSet tensorMap &&
+  (graphTensorVars srcGraph Set.\\ graphOutputNodes srcGraph) == Map.keysSet tensorMap &&
   varsInGraph srcGraph == Map.keysSet termMap
 
 requireSingleSourceOutput :: String -> Substitution -> Tensor
@@ -79,7 +79,9 @@ matchTensors srcGraph targetGraph srcTensor targetTensor partialMatch = do
 
 matchExpressions :: Graph -> Graph -> Expr -> Expr -> Match -> Maybe Match
 matchExpressions srcGraph targetGraph srcExpr targetExpr partialMatch = case (srcExpr, targetExpr) of
+  (_, Output _) -> Nothing
   (Input, _) -> Just partialMatch
+  (Output _, _) -> Nothing
   (_, Input) -> Nothing
   (Conv2D k1 s1 p1 a1 x1 y1, Conv2D k2 s2 p2 a2 x2 y2) -> matchKernel2DTerms k1 k2 partialMatch >>= matchStride2DTerms s1 s2 >>= matchPadModeTerms p1 p2 >>= matchActiModeTerms a1 a2 >>= matchTnsrs x1 x2 >>= matchTnsrs y1 y2
   (Pool2DAvg k1 s1 p1 x1, Pool2DAvg k2 s2 p2 x2) -> matchKernel2DTerms k1 k2 partialMatch >>= matchStride2DTerms s1 s2 >>= matchPadModeTerms p1 p2 >>= matchTnsrs x1 x2

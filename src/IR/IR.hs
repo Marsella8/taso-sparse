@@ -142,6 +142,7 @@ termSort term =
 -- Also note that these expressions always have a tensor output.
 data Expr
   = Input --inputs are explictly marked
+  | Output Tensor --outputs are explicitly marked
   | Conv2D Kernel2DTerm Stride2DTerm PadModeTerm ActiModeTerm Tensor Tensor
   | Pool2DAvg Kernel2DTerm Stride2DTerm PadModeTerm Tensor
   | Pool2DMax Kernel2DTerm Stride2DTerm PadModeTerm Tensor
@@ -163,6 +164,7 @@ data Expr
 
 varsInExpr :: Expr -> Set Var
 varsInExpr Input = Set.empty
+varsInExpr (Output _) = Set.empty
 varsInExpr (Conv2D k s p a _ _) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p, varsInActiModeTerm a]
 varsInExpr (Pool2DAvg k s p _) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p]
 varsInExpr (Pool2DMax k s p _) = Set.unions [varsInKernel2DTerm k, varsInStride2DTerm s, varsInPadModeTerm p]
@@ -209,6 +211,7 @@ varsInScalarTerm (ScalarMul a b) = varsInScalarTerm a `Set.union` varsInScalarTe
 
 tensorsInExpr :: Expr -> Set Tensor
 tensorsInExpr Input = Set.empty
+tensorsInExpr (Output x) = Set.singleton x
 tensorsInExpr (Conv2D _ _ _ _ x y) = Set.fromList [x, y]
 tensorsInExpr (Pool2DAvg _ _ _ x) = Set.singleton x
 tensorsInExpr (Pool2DMax _ _ _ x) = Set.singleton x
@@ -231,6 +234,7 @@ atomicExprRename :: Map.Map Tensor Tensor -> Expr -> Expr
 atomicExprRename renameMap expr =
   case expr of
     Input -> Input
+    Output x -> Output (atomicRenameTensor renameMap x)
     Conv2D k s p a x y -> Conv2D k s p a (atomicRenameTensor renameMap x) (atomicRenameTensor renameMap y)
     Pool2DAvg k s p x -> Pool2DAvg k s p (atomicRenameTensor renameMap x)
     Pool2DMax k s p x -> Pool2DMax k s p (atomicRenameTensor renameMap x)
@@ -265,6 +269,7 @@ instantiateExprTerms :: Map.Map Var Term -> Expr -> Expr
 instantiateExprTerms instantiateMap expr =
   case expr of
     Input -> Input
+    Output x -> Output x
     Conv2D k s p a x y ->
       Conv2D
         (instantiateKernel2DTerm instantiateMap k)

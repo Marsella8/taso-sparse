@@ -8,15 +8,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import IR.Graph
 import IR.IR
-import Substitutions.Match (Match(..), matchSubstitution, matchIsComplete, matchIsWellSorted)
+import Substitutions.Match (Match(..), matchSubstitution, matchIsComplete, matchIsWellSorted, requireSingleSourceOutput)
 import Substitutions.Substitution (Substitution(..))
-
-requireSingleSourceOutput :: String -> Substitution -> Tensor
-requireSingleSourceOutput context sub =
-  case Set.toAscList (graphOutputs (subSrc sub)) of
-    [srcOut] -> srcOut
-    _ ->
-      error (context ++ ": substitutions with multiple source outputs are unsupported")
 
 requireSingleMappedOutput :: String -> Substitution -> (Tensor, Tensor)
 requireSingleMappedOutput context sub =
@@ -46,7 +39,7 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
   let srcGraph = subSrc sub
       dstGraph = subDst sub
       (srcOut, dstOut) = requireSupportedOutputPair "applyMatchedSubstitution" sub
-      srcImage = Set.map (mt match) (graphTensorVars srcGraph)
+      srcImage = Set.map (mt match) (graphTensorVars srcGraph Set.\\ graphOutputNodes srcGraph)
       inputImage = Set.map (mt match) (graphInputs srcGraph)
       matchedTarget = mt match srcOut
       isPassThrough = Set.member dstOut (graphInputs dstGraph)
@@ -63,15 +56,16 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
         , Just tt <- [Map.lookup sv (matchTermMap match)]
         ]
       instDst = instantiateGraphTerms dstGraph dstInstMap
-      dstCore = graphWithoutKeys (graphInputs instDst) instDst
+      dstCore = graphWithoutKeys (graphInputs instDst `Set.union` graphOutputNodes instDst) instDst
       srcOutIsSrcInput = Set.member srcOut (graphInputs srcGraph)
-  if isPassThrough
+  results <- if isPassThrough
     then applyPassThrough target sub match dstOut matchedTarget consumers origOutputs gcScope
     else if srcOutIsSrcInput && not (null consumers)
       then applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
              consumers origOutputs gcScope
       else applyRedefine target sub match dstOut instDst dstCore matchedTarget
              origOutputs gcScope
+  Just (map deadCodeElim results)
 
 applyPassThrough
   :: Graph -> Substitution -> Match -> Tensor -> Tensor

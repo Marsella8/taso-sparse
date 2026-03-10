@@ -69,7 +69,7 @@ serializeGraphSpec :: Spec
 serializeGraphSpec =
   it "serialize: graph" $ do
     let graphIn = mustGraph [(x, inp), (out, relu x)]
-        correct = "(graph (asst (tensor out) (relu (tensor x))) (asst (tensor x) (input)))"
+        correct = "(graph (asst (tensor __o0) (output (tensor out))) (asst (tensor out) (relu (tensor x))) (asst (tensor x) (input)))"
         output = renderSExpr (toSExpr graphIn)
     output `shouldBe` correct
 
@@ -84,6 +84,6 @@ serializeSubstitutionSpec =
             , subVarMap = mustVarBimap [(scalarVar "a", scalarVar "a")]
             , subOutputMap = mustTensorBimap [(out, out)]
             }
-        correct = "(substitution (graph (asst (tensor out) (mul (tensor x) (scalar a))) (asst (tensor x) (input))) (graph (asst (tensor d0) (transpose (tensor x))) (asst (tensor out) (mul (tensor d0) (scalar a))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((scalar a) (scalar a))) (bimap ((tensor out) (tensor out))))"
+        correct = "(substitution (graph (asst (tensor __o0) (output (tensor out))) (asst (tensor out) (mul (tensor x) (scalar a))) (asst (tensor x) (input))) (graph (asst (tensor __o0) (output (tensor out))) (asst (tensor d0) (transpose (tensor x))) (asst (tensor out) (mul (tensor d0) (scalar a))) (asst (tensor x) (input))) (bimap ((tensor x) (tensor x))) (bimap ((scalar a) (scalar a))) (bimap ((tensor out) (tensor out))))"
         output = renderSExpr (toSExpr rw)
     output `shouldBe` correct
