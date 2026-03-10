@@ -58,7 +58,9 @@ fwdSubs =
   ]
 
 bwdSubs :: [Substitution]
-bwdSubs = map invertSubstitution fwdSubs
+bwdSubs =
+  map invertSubstitution $
+    filter (\sub -> sub /= axiom28 && sub /= axiom29) fwdSubs
 
 allSubs :: [Substitution]
 allSubs = fwdSubs ++ bwdSubs
