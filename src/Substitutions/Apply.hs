@@ -35,8 +35,8 @@ requireSupportedOutputPair context sub =
 
 applySubstitution :: Graph -> Substitution -> Set.Set Graph
 applySubstitution target sub =
-  case requireSupportedOutputPair "applySubstitution" sub of
-    _ -> Set.fromList $ concatMap (\m -> applyMatchedSubstitution target sub m) matches
+  requireSupportedOutputPair "applySubstitution" sub `seq`
+    Set.fromList (concatMap (\m -> applyMatchedSubstitution target sub m) matches)
   where
     matches = Set.toList (matchSubstitution sub target)
 

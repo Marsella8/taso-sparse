@@ -53,17 +53,18 @@ We then recursively match accoring to the following rules. For a given pair of n
 
 \subsection{Substitution Application}
 
-Our application has several constraints that it must satisfy:
-1) Possible surjective matching. That is:
-  Given the substiutiton matmul(x.T, y.T) -> matmul(x,y).T, we should be able to apply it to the graph matmul(a.T, a.T). i.e. x->a and y->a.
-2) A given pattern must be abe to match any subgraph.
-  for example, x.T.T should be albe to be applied even if x is not an input of x.T.T is not the output.
-3) Must handle graphs that have multiple outputs (but not substitutions that have multiple outputs).
+Our application system is split into 2 parts:
+1) Apply
+2) Canonicalize
 
-4) It must be possible that the substitution causes an input and an output tensor to be matched into one. For example, given the sibstitution x.T.T ->x, we must be able to apply it to the following graph:
-x = input()
+1) Apply
+We handle the following cases:
+a) Surjective variable match. In particular, matmul(x,y) as src should match matmul(x,x)
+b) Occurrence based rewriting. For example, given matmul(x,x), the system should be able to rewrite to matmul(x,x.T.T) (ie. only one application of x has been rewritten, so not the node).
+c) Input and Output in the dst graph of the subsitution are aliased. For example, x.T.T -> x, should be able to be applied correctly.
+x = input() #in
 y = x.T
-z = y.T
+z = y.T #out
 w = relu(z)
 
 and get the following graph:
@@ -71,13 +72,30 @@ and get the following graph:
 x = input()
 w = relu(x)
 
-5) Remove common subexpressions
+d) A pattern must be able to match any subgraph.
+For example, x.T.T should be albe to be applied even if x is not an input of the graph and x.T.T is not the output of the graph.
 
-6) Remove unused tensors (except inputs and outputs).
+e) Must be able to match graphs with multiple outputs.
 
-7) Allow for occurrence based rewriting.
-For example, given matmul(x,x), the system should be able to rewrite to matmul(x,x.T.T) (ie. only one application of x has been rewritten, so not the node).
-\subsection{Proof Search}
+f) Should be able to handle dangling expressions cleanly:
+- For example, consider:
+
+x = input
+y = tr(x)
+z = tr(y)
+w = matmul(y,z)
+
+given x.T.T, we should be able to recover:
+
+x = input
+y = tr(x)
+w = matmul(y, x)
+
+We then perform a canonialicazion pass which does the following:
+a) Remove common subexpressions
+b) Remove unused tensors (except inputs, which must always be kept, and outputs, which must always be kept).
+c) Remove graphs that became cycles.
+
 
 One of the main motivations for enforcing a bidireactioanl rewrite system, was, in addition to completeness, the follows:
 A nice property of a fully bidirectional rewrite system is that if we have an intermediate state s for which we have sound derivations src*->s and dst*->s, then we can invert the dst->s derivation and then chain it to obtain a sound src*->dst derivation (and viceversa).
