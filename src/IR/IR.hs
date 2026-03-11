@@ -257,6 +257,40 @@ atomicRenameTensor :: Map.Map Tensor Tensor -> Tensor -> Tensor
 atomicRenameTensor renameMap tensor =
   Map.findWithDefault tensor tensor renameMap
 
+perOccurrenceExprRename :: Tensor -> Tensor -> Expr -> [Expr]
+perOccurrenceExprRename old new expr
+  | old == new = []
+  | otherwise = case expr of
+      Input -> []
+      Output x -> [Output new | x == old]
+      Conv2D k s p a x y ->
+        [Conv2D k s p a new y | x == old] ++
+        [Conv2D k s p a x new | y == old]
+      Pool2DAvg k s p x -> [Pool2DAvg k s p new | x == old]
+      Pool2DMax k s p x -> [Pool2DMax k s p new | x == old]
+      Relu x -> [Relu new | x == old]
+      MatMul x y ->
+        [MatMul new y | x == old] ++
+        [MatMul x new | y == old]
+      EwAdd x y ->
+        [EwAdd new y | x == old] ++
+        [EwAdd x new | y == old]
+      EwMul x y ->
+        [EwMul new y | x == old] ++
+        [EwMul x new | y == old]
+      Mul x s -> [Mul new s | x == old]
+      Transpose x -> [Transpose new | x == old]
+      Concat a x y ->
+        [Concat a new y | x == old] ++
+        [Concat a x new | y == old]
+      Split0 a x -> [Split0 a new | x == old]
+      Split1 a x -> [Split1 a new | x == old]
+      Enlarge k x -> [Enlarge k new | x == old]
+      ConstPool _ -> []
+      ConstIConv _ -> []
+      ConstImm -> []
+      ConstOne -> []
+
 freshTensors :: Set Tensor -> [Tensor]
 freshTensors used =
   [ t

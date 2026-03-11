@@ -2,7 +2,7 @@ module Substitutions.Apply where
 
 import Control.Monad (guard)
 import qualified Data.Bimap as Bi
-import Data.List (partition)
+import Data.List (nub, partition)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
@@ -65,7 +65,7 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
              consumers origOutputs gcScope
       else applyRedefine target sub match dstOut instDst dstCore matchedTarget
              origOutputs gcScope
-  Just (map deadCodeElim results)
+  Just (nub (map deadCodeElim results))
 
 applyPassThrough
   :: Graph -> Substitution -> Match -> Tensor -> Tensor
@@ -87,13 +87,15 @@ applyPassThrough target sub match dstOut matchedTarget consumers origOutputs gcS
       then
         let redir = Map.singleton matchedTarget redirectTo
             redirect g (c, expr) = graphUpdateBinding c (atomicExprRename redir expr) g
-            perConsumer =
-              [ gcMatchedImage gcScope origOutputs (redirect target p)
-              | p <- consumers
+            perOccurrence =
+              [ gcMatchedImage gcScope origOutputs
+                  (graphUpdateBinding c renamedExpr target)
+              | (c, expr) <- consumers
+              , renamedExpr <- perOccurrenceExprRename matchedTarget redirectTo expr
               ]
             allGraph = foldl redirect target consumers
             allResult = gcMatchedImage gcScope origOutputs allGraph
-        in Just (if length consumers > 1 then perConsumer ++ [allResult] else perConsumer)
+        in Just (perOccurrence ++ [allResult])
       else
         Just []
 
@@ -162,13 +164,15 @@ applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
   augmented <- graphAddBindings (graphBindings renamedDstCore) target
   let redir = Map.singleton matchedTarget redirectTarget
       redirect g (c, expr) = graphUpdateBinding c (atomicExprRename redir expr) g
-      perConsumer =
-        [ cseGraph $ gcMatchedImage gcScope origOutputs (redirect augmented p)
-        | p <- consumers
+      perOccurrence =
+        [ cseGraph $ gcMatchedImage gcScope origOutputs
+            (graphUpdateBinding c renamedExpr augmented)
+        | (c, expr) <- consumers
+        , renamedExpr <- perOccurrenceExprRename matchedTarget redirectTarget expr
         ]
       allGraph = foldl redirect augmented consumers
       allResult = cseGraph $ gcMatchedImage gcScope origOutputs allGraph
-  Just (if length consumers > 1 then perConsumer ++ [allResult] else perConsumer)
+  Just (perOccurrence ++ [allResult])
 
 mt :: Match -> Tensor -> Tensor
 mt match tensor = matchTensorMap match Map.! tensor

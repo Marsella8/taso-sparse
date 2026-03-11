@@ -55,6 +55,10 @@ fwdSubs =
   , lemmaTransposeConstImm
   , lemmaLeftConstImm
   , lemmaPool2dAvgConcatAxis0
+  , lemmaTransposeConcatAxis0
+  , lemmaMatMulConcatLeft
+  , lemmaConstIConvLeft
+  , lemmaConvConcatInput
   ]
 
 bwdSubs :: [Substitution]
@@ -809,5 +813,72 @@ axiom44b =
     , (out, pool2dMax k stride11 padSame s0)
     ]
     [ (out, ConstPool k)
+    ]
+    (out, out)
+
+-- Complement of axiom35: transpose distributes over concat with axis0↔axis1 swap
+lemmaTransposeConcatAxis0 :: Substitution
+lemmaTransposeConcatAxis0 =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (s0, transpose x)
+    , (s1, transpose y)
+    , (out, concatT axis0 s0 s1)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (d0, concatT axis1 x y)
+    , (out, transpose d0)
+    ]
+    (out, out)
+
+-- Complement of axiom36: matMul left-distributes over axis0 concat (shared right operand)
+lemmaMatMulConcatLeft :: Substitution
+lemmaMatMulConcatLeft =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (s0, matMul x z)
+    , (s1, matMul y z)
+    , (out, concatT axis0 s0 s1)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (d0, concatT axis0 x y)
+    , (out, matMul d0 z)
+    ]
+    (out, out)
+
+-- Complement of axiom25: ConstIConv as conv2d input (position 1) produces enlarge
+lemmaConstIConvLeft :: Substitution
+lemmaConstIConvLeft =
+  mustSub
+    [ (y, inp)
+    , (s0, ConstIConv k)
+    , (out, conv2d k stride11 padSame actNone s0 y)
+    ]
+    [ (y, inp)
+    , (out, enlarge k y)
+    ]
+    (out, out)
+
+lemmaConvConcatInput :: Substitution
+lemmaConvConcatInput =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (s0, conv2d k s p c x z)
+    , (s1, conv2d k s p c y z)
+    , (out, concatT axis1 s0 s1)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (d0, concatT axis1 x y)
+    , (out, conv2d k s p c d0 z)
     ]
     (out, out)
