@@ -8,7 +8,7 @@ import Control.Parallel.Strategies (parMap, rdeepseq, rseq)
 import qualified Data.Set as Set
 import IR.Graph (canonicalizeGraph, cseGraph, graphBindings)
 import IR.Isomorphic (isomorphicGraphs)
-import Search (SearchConfig(..), saturateUnderSubstitutions)
+import Search (SearchConfig(..), mutuallyReachableUnderSubstitutions, saturateUnderSubstitutions)
 import Substitutions.Substitution (Substitution(..))
 import Control.Monad (forM_, guard, when)
 import Data.List (elemIndex)
@@ -29,7 +29,7 @@ main = do
         | quickReport =
             SearchConfig {maxDepth = 2, maxNumSteps = 50}
         | otherwise =
-            SearchConfig {maxDepth = 4, maxNumSteps = 500}
+            SearchConfig {maxDepth = 6, maxNumSteps = 12000}
 
   allSubstitutions <- Set.toAscList <$> substitutions
   let total = length allSubstitutions
@@ -133,10 +133,16 @@ runTrace config sub idx = do
 runFailureReport :: SearchConfig -> [Substitution] -> Int -> Bool -> IO ()
 runFailureReport searchConfig allSubstitutions total quickReport = do
   let indexed = zip [0 ..] allSubstitutions
-      results =
-        parMap rdeepseq (\(i, sub) -> (i, substitutionMatchDetail searchConfig sub)) indexed
-      passed = [(i, detail) | (i, detail) <- results, matchPassed detail]
-      failed = [(i, detail) | (i, detail) <- results, not (matchPassed detail)]
+      matchResults =
+        parMap rseq
+          (\(i, sub) -> (i, mutuallyReachableUnderSubstitutions (subSrc sub) (subDst sub) allSubs searchConfig))
+          indexed
+      passed = [i | (i, True) <- matchResults]
+      failedIndices = [i | (i, False) <- matchResults]
+      failed =
+        parMap rdeepseq
+          (\i -> (i, substitutionMatchDetail searchConfig (allSubstitutions !! i)))
+          failedIndices
 
   let suffix = if quickReport then "-quick" else ""
       reportPath = "failure-report" ++ suffix ++ ".md"
@@ -178,7 +184,7 @@ substitutionMatchDetail searchConfig substitution =
     srcReachable = saturateUnderSubstitutions (subSrc substitution) allSubs searchConfig
     dstReachable = saturateUnderSubstitutions (subDst substitution) allSubs searchConfig
 
-buildReport :: Int -> [(Int, MatchDetail)] -> [(Int, MatchDetail)] -> Bool -> String
+buildReport :: Int -> [Int] -> [(Int, MatchDetail)] -> Bool -> String
 buildReport total passed failed quickReport =
   unlines $
     [ "# TASO substitution match failure report"
@@ -189,6 +195,8 @@ buildReport total passed failed quickReport =
     , "- **Total:** " ++ show total
     , "- **Passed:** " ++ show (length passed)
     , "- **Failed:** " ++ show (length failed)
+    , "- **Pass/fail check:** early-exit bidirectional search"
+    , "- **Failure diagnostics below:** full reachable-set saturation for the remaining failures"
     , ""
     , "## Failure details"
     , ""
@@ -236,7 +244,4 @@ buildReport total passed failed quickReport =
 
 substitutionMatches :: SearchConfig -> Substitution -> Bool
 substitutionMatches searchConfig substitution =
-  not (Set.null (Set.intersection srcReachable dstReachable))
-  where
-    srcReachable = saturateUnderSubstitutions (subSrc substitution) allSubs searchConfig
-    dstReachable = saturateUnderSubstitutions (subDst substitution) allSubs searchConfig
+  mutuallyReachableUnderSubstitutions (subSrc substitution) (subDst substitution) allSubs searchConfig
