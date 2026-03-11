@@ -178,7 +178,7 @@ multiOutputSourceSubstitutionRejectedSpec =
             , (y, inp)
             ]
     evaluate (Set.size (applySubstitution targetGraph inv28))
-      `shouldThrow` errorCall "matchSubstitution: substitutions with multiple source outputs are unsupported"
+      `shouldThrow` errorCall "applySubstitution: substitutions with multiple source outputs are unsupported"
 
 nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
 nonInjectiveInternalMatchProducesCorrectResultSpec =

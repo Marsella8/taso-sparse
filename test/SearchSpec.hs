@@ -24,6 +24,9 @@ import Axioms
   , axiom44a
   , axiom44b
   , lemmaTransposeConstImm
+  , lemmaMatMulConcatLeft
+  , lemmaConstIConvLeft
+  , lemmaConvConcatInput
   )
 import Control.Parallel.Strategies (runEval, rpar, rseq)
 import qualified Data.Set as Set
@@ -366,7 +369,7 @@ nestedMatMulConcatPackagingShouldBeReachableSpec =
             , (out, concatT axis0 d0 d1)
             ]
         config = SearchConfig {maxDepth = 6, maxNumSteps = 1000}
-        axioms = [axiom13, invertSubstitution axiom13, axiom36, invertSubstitution axiom36]
+        axioms = [axiom13, invertSubstitution axiom13, axiom36, invertSubstitution axiom36, lemmaMatMulConcatLeft, invertSubstitution lemmaMatMulConcatLeft]
     expectMutuallyReachable startGraph targetGraph axioms config
 
 transposeConcatAxisSwapShouldBeReachableSpec :: Spec
@@ -406,7 +409,7 @@ leftConstIConvShouldCollapseToEnlargeSpec =
             , (out, enlarge k33 y)
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
-        axioms = [axiom21, invertSubstitution axiom21, axiom25, invertSubstitution axiom25]
+        axioms = [axiom21, invertSubstitution axiom21, axiom25, invertSubstitution axiom25, lemmaConstIConvLeft, invertSubstitution lemmaConstIConvLeft]
     expectMutuallyReachable startGraph targetGraph axioms config
 
 sameKernelConvMergeShouldBeReachableSpec :: Spec
@@ -847,8 +850,9 @@ convBatchingAcrossBothAxesShouldBeReachableSpec =
             , (d1, concatT axis1 x1 x2)
             , (out, conv2d (kernelLit 1 3) stride11 padSame actNone d1 d0)
             ]
-        subs = [axiom39, invertSubstitution axiom39]
-        config = SearchConfig {maxDepth = 10, maxNumSteps = 100}
+        subs = [axiom39, invertSubstitution axiom39
+               , lemmaConvConcatInput, invertSubstitution lemmaConvConcatInput]
+        config = SearchConfig {maxDepth = 10, maxNumSteps = 200}
     expectMutuallyReachable startGraph targetGraph subs config
 
 constPoolShouldBeReachableFromPoolAvgConstIConvSpec :: Spec
