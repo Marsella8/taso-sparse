@@ -20,10 +20,20 @@
 
 \renewcommand{\shortauthors}{Marsella and Wirth}
 
+% TODO: be consistent: always call them substitutions, not rewrite rules.
+
 \begin{document}
 
 \begin{abstract}
-TODO: Add abstract (about 100--150 words).
+Machine Learning compilers have emerged as a major tool for optimizing the execution of deep learning models without having to resort to expensive hand optimizations. 
+One of their key steps is algebraic substitution. An algebraic substitution is a pair of semantically equivalent computation graphs.
+Given a computation graph, and a set of substitutiosn, the compiler is able to detect and repeatedly apply substitutions in order to optmize some cost metric.
+While many methods hard code substiitions [FILL THIS IN], more modern apporaches such as TASO (Tensor ...) attempt to find these subtitutions autoamtically, givne a set of operaotr axioms.
+In this paper, we show that, with a sufficiently powerful rewrite system, all the subsittuions can be recovered given a set of axiomatic rewrites.
+
+
+Our paper essentially says: given all the valid equalities (under some bound, in this case the number of ops in the graphs of LHS and RHS), which can be proved given T_UF + the axioms, can we construct a rewrite system such that if 2 expressions are equivalent (modulo graph canonicalization, which we intend as removing dead code, and unifying common subexpressions), then there exists a series of rewrites which can transform one into the other.
+
 \end{abstract}
 
 % \keywords{graph rewriting, deep learning compilers, TASO, substitution systems}
