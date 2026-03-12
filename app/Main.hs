@@ -13,7 +13,7 @@ import Substitutions.Substitution (Substitution(..))
 import Control.Monad (forM_, guard, when)
 import Data.List (elemIndex)
 import System.Environment (getArgs)
-import TASO (substitutions)
+import TASO (loadSubstitutions, substitutions, substitutionsPath)
 
 main :: IO ()
 main = do
@@ -24,32 +24,44 @@ main = do
         i <- elemIndex "--trace" args
         guard (i + 1 < length args)
         readMaybe (args !! (i + 1)) :: Maybe Int
+      mapReportIndices = "--map-report-indices" `elem` args
+      mapReportIndexArgs = do
+        i <- elemIndex "--map-report-indices" args
+        guard (i + 1 < length args)
+        traverse readMaybe (splitCommas (args !! (i + 1)))
 
   let searchConfig
         | quickReport =
             SearchConfig {maxDepth = 2, maxNumSteps = 50}
         | otherwise =
-            SearchConfig {maxDepth = 6, maxNumSteps = 12000}
+            SearchConfig {maxDepth = 6, maxNumSteps = 18000}
 
+  rawSubstitutions <- loadSubstitutions
   allSubstitutions <- Set.toAscList <$> substitutions
   let total = length allSubstitutions
 
-  case traceIndex of
-    Just n | n >= 0 && n < total ->
-      runTrace searchConfig (allSubstitutions !! n) n
-    Just n ->
-      putStrLn ("Trace index " ++ show n ++ " out of range [0.." ++ show (total - 1) ++ "]")
-    Nothing ->
-      case dumpLhsRhsIndices args of
-        Just indices ->
-          runDumpLhsRhs allSubstitutions indices
-        _ ->
-          if reportMode || quickReport
-            then runFailureReport searchConfig allSubstitutions total quickReport
-            else do
-              let results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
-                  !matched = length (filter id results)
-              putStrLn ("Matched: " ++ show matched ++ " / " ++ show total)
+  if mapReportIndices
+    then
+      case mapReportIndexArgs of
+        Just indices -> runMapReportIndices rawSubstitutions allSubstitutions indices
+        Nothing -> putStrLn "Usage: --map-report-indices \"82,83,...\""
+    else
+      case traceIndex of
+        Just n | n >= 0 && n < total ->
+          runTrace searchConfig (allSubstitutions !! n) n
+        Just n ->
+          putStrLn ("Trace index " ++ show n ++ " out of range [0.." ++ show (total - 1) ++ "]")
+        Nothing ->
+          case dumpLhsRhsIndices args of
+            Just indices ->
+              runDumpLhsRhs allSubstitutions indices
+            _ ->
+              if reportMode || quickReport
+                then runFailureReport searchConfig allSubstitutions total quickReport
+                else do
+                  let results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
+                      !matched = length (filter id results)
+                  putStrLn ("Matched: " ++ show matched ++ " / " ++ show total)
 
 dumpLhsRhsIndices :: [String] -> Maybe [Int]
 dumpLhsRhsIndices args = do
@@ -83,6 +95,28 @@ runDumpLhsRhs allSubstitutions indices = do
     putStrLn ""
   where
     showBinding (t, e) = show t ++ " = " ++ show e
+
+runMapReportIndices :: [Substitution] -> [Substitution] -> [Int] -> IO ()
+runMapReportIndices rawSubstitutions sortedSubstitutions indices = do
+  putStrLn ("Loaded substitutions file: " ++ substitutionsPath)
+  forM_ indices $ \reportIdx ->
+    if reportIdx < 0 || reportIdx >= length sortedSubstitutions
+      then putStrLn ("report " ++ show reportIdx ++ ": out of range")
+      else
+        let sub = sortedSubstitutions !! reportIdx
+            fileIndex = elemIndex sub rawSubstitutions
+        in case fileIndex of
+             Nothing ->
+               putStrLn ("report " ++ show reportIdx ++ ": not found in raw file order")
+             Just i ->
+               putStrLn
+                 ("report "
+                  ++ show reportIdx
+                  ++ " -> file index "
+                  ++ show i
+                  ++ " (line "
+                  ++ show (i + 1)
+                  ++ ")")
 
 readMaybe :: Read a => String -> Maybe a
 readMaybe s = case reads s of

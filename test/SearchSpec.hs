@@ -27,6 +27,8 @@ import Axioms
   , lemmaMatMulConcatLeft
   , lemmaConstIConvLeft
   , lemmaConvConcatInput
+  , lemmaLeftDistrib
+  , lemmaConvReluConstIConv
   )
 import Control.Parallel.Strategies (runEval, rpar, rseq)
 import qualified Data.Set as Set
@@ -102,6 +104,11 @@ spec = parallel $ do
   cseBadWitnessReuseMultiInputShouldNotReachSpec
   split0ConcatFanoutWithDeadCodeCascadeReluSpec
   split0ConcatFanoutWithDeadCodeCascadeMatMulSpec
+  constIConvReluPairShouldReduceToReluPairSpec
+  constIConvChainedReluShouldReduceSpec
+  leftDistribShouldBeReachableSpec
+  convReluConstIConvShortcutShouldBeReachableSpec
+  leftFactoringWithIdentityShouldBeReachableSpec
 
 emptyAxiomListReturnsStartGraphSpec :: Spec
 emptyAxiomListReturnsStartGraphSpec =
@@ -224,15 +231,16 @@ inverseDoubleTransposeInsertionShouldBeReachableSpec =
 inverseConstIConvInsertionShouldBeReachableSpec :: Spec
 inverseConstIConvInsertionShouldBeReachableSpec =
   it "search: inverse ConstIConv insertion should make conv2d(x, ConstIConv) reachable from x" $ do
-    let startGraph =
+    let k33 = kernelLit 3 3
+        startGraph =
           mustGraph
             [ (x, inp)
             ]
         targetGraph =
           mustGraph
             [ (x, inp)
-            , (s0, ConstIConv k)
-            , (out, conv2d k stride11 padSame actNone x s0)
+            , (s0, ConstIConv k33)
+            , (out, conv2d k33 stride11 padSame actNone x s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
     expectMutuallyReachable startGraph targetGraph [axiom25, invertSubstitution axiom25] config
@@ -1070,6 +1078,117 @@ scalarDistributionWithDuplicateOutsideUseShouldBeReachableSpec =
             ]
         config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
     expectMutuallyReachable startGraph targetGraph allSubs config
+
+leftDistribShouldBeReachableSpec :: Spec
+leftDistribShouldBeReachableSpec =
+  it "search: left distributivity of MatMul over EwAdd should be reachable" $ do
+    let startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (s0, ewAdd x y)
+            , (out, matMul s0 z)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (z, inp)
+            , (d0, matMul x z)
+            , (d1, matMul y z)
+            , (out, ewAdd d0 d1)
+            ]
+        subs = [lemmaLeftDistrib, invertSubstitution lemmaLeftDistrib]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
+    expectMutuallyReachable startGraph targetGraph subs config
+
+convReluConstIConvShortcutShouldBeReachableSpec :: Spec
+convReluConstIConvShortcutShouldBeReachableSpec =
+  it "search: conv2d_relu(x, ConstIConv) should reduce to relu(x) in one step" $ do
+    let k33 = kernelLit 3 3
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (s0, ConstIConv k33)
+            , (out, conv2d k33 stride11 padSame actRelu x s0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (out, relu x)
+            ]
+        subs = [lemmaConvReluConstIConv, invertSubstitution lemmaConvReluConstIConv]
+        config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
+    expectMutuallyReachable startGraph targetGraph subs config
+
+leftFactoringWithIdentityShouldBeReachableSpec :: Spec
+leftFactoringWithIdentityShouldBeReachableSpec =
+  it "search: x + t4*x should reduce to (t4 + ConstImm)*x via left distrib" $ do
+    let t4 = t "t4"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (t4, inp)
+            , (s0, matMul t4 x)
+            , (out, ewAdd x s0)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (t4, inp)
+            , (d0, ConstImm)
+            , (d1, ewAdd t4 d0)
+            , (out, matMul d1 x)
+            ]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 5000}
+    expectMutuallyReachable startGraph targetGraph allSubs config
+
+constIConvReluPairShouldReduceToReluPairSpec :: Spec
+constIConvReluPairShouldReduceToReluPairSpec =
+  it "search: two conv2d_relu(input, ConstIConv) should reduce to two relu(input) outputs" $ do
+    let k33 = kernelLit 3 3
+        ci = t "ci"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (ci, ConstIConv k33)
+            , (s0, conv2d k33 stride11 padSame actRelu x ci)
+            , (s1, conv2d k33 stride11 padSame actRelu y ci)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (y, inp)
+            , (d0, relu x)
+            , (d1, relu y)
+            ]
+        subs = [axiom22, invertSubstitution axiom22, axiom25, invertSubstitution axiom25]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 18000}
+    expectMutuallyReachable startGraph targetGraph subs config
+
+constIConvChainedReluShouldReduceSpec :: Spec
+constIConvChainedReluShouldReduceSpec =
+  it "search: conv2d_relu(conv2d_relu(x, ConstIConv), ConstIConv) should reduce to relu(relu(x))" $ do
+    let k33 = kernelLit 3 3
+        ci = t "ci"
+        startGraph =
+          mustGraph
+            [ (x, inp)
+            , (ci, ConstIConv k33)
+            , (s0, conv2d k33 stride11 padSame actRelu x ci)
+            , (out, conv2d k33 stride11 padSame actRelu s0 ci)
+            ]
+        targetGraph =
+          mustGraph
+            [ (x, inp)
+            , (d0, relu x)
+            , (out, relu d0)
+            ]
+        subs = [axiom22, invertSubstitution axiom22, axiom25, invertSubstitution axiom25]
+        config = SearchConfig {maxDepth = 6, maxNumSteps = 18000}
+    expectMutuallyReachable startGraph targetGraph subs config
 
 expectReachable :: Graph -> Set.Set Graph -> IO ()
 expectReachable targetGraph searchedGraphs =

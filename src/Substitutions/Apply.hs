@@ -50,21 +50,25 @@ applyMatchedSubstitution target sub match = fromMaybe [] $ do
                    ]
       origOutputs = graphOutputs target
       gcScope = (srcImage `Set.difference` inputImage) `Set.difference` origOutputs
-      dstInstMap = Map.fromList
+      baseDstInstMap = Map.fromList
         [ (dv, tt)
         | (sv, dv) <- Bi.toList (subVarMap sub)
         , Just tt <- [Map.lookup sv (matchTermMap match)]
         ]
-      instDst = instantiateGraphTerms dstGraph dstInstMap
-      dstCore = graphWithoutKeys (graphInputs instDst `Set.union` graphOutputNodes instDst) instDst
+      dstInstMaps = enumerateFreeVars dstGraph baseDstInstMap
       srcOutIsSrcInput = Set.member srcOut (graphInputs srcGraph)
   results <- if isPassThrough
     then applyPassThrough target sub match dstOut matchedTarget consumers origOutputs gcScope
-    else if srcOutIsSrcInput && not (null consumers)
-      then applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
-             consumers origOutputs gcScope
-      else applyRedefine target sub match dstOut instDst dstCore matchedTarget
-             origOutputs gcScope
+    else Just $ concatMap (\instMap ->
+      let instDst = instantiateGraphTerms dstGraph instMap
+          dstCore = graphWithoutKeys (graphInputs instDst `Set.union` graphOutputNodes instDst) instDst
+      in fromMaybe [] $
+        if srcOutIsSrcInput && not (null consumers)
+          then applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
+                 consumers origOutputs gcScope
+          else applyRedefine target sub match dstOut instDst dstCore matchedTarget
+                 origOutputs gcScope
+      ) dstInstMaps
   Just (nub (map deadCodeElim results))
 
 applyPassThrough
@@ -176,3 +180,21 @@ applyOccurrenceLocal target sub match dstOut instDst dstCore matchedTarget
 
 mt :: Match -> Tensor -> Tensor
 mt match tensor = matchTensorMap match Map.! tensor
+
+enumerateFreeVars :: Graph -> Map.Map Var Term -> [Map.Map Var Term]
+enumerateFreeVars dstGraph baseMap =
+  let freeVars = Set.toList (varsInGraph dstGraph Set.\\ Map.keysSet baseMap)
+  in crossProduct baseMap freeVars
+  where
+    crossProduct acc [] = [acc]
+    crossProduct acc (v:vs) =
+      case candidateTerms v of
+        [] -> crossProduct acc vs
+        candidates -> concatMap (\val -> crossProduct (Map.insert v val acc) vs) candidates
+
+    candidateTerms :: Var -> [Term]
+    candidateTerms (Kernel2DVar _) =
+      [ Kernel2DTm (Kernel2DTermLit (Kernel2DLiteral 1 3))
+      , Kernel2DTm (Kernel2DTermLit (Kernel2DLiteral 3 3))
+      ]
+    candidateTerms _ = []

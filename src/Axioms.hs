@@ -59,6 +59,8 @@ fwdSubs =
   , lemmaMatMulConcatLeft
   , lemmaConstIConvLeft
   , lemmaConvConcatInput
+  , lemmaLeftDistrib
+  , lemmaConvReluConstIConv
   ]
 
 bwdSubs :: [Substitution]
@@ -880,5 +882,35 @@ lemmaConvConcatInput =
     , (z, inp)
     , (d0, concatT axis1 x y)
     , (out, conv2d k s p c d0 z)
+    ]
+    (out, out)
+
+lemmaLeftDistrib :: Substitution
+lemmaLeftDistrib =
+  mustSub
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (s0, ewAdd x y)
+    , (out, matMul s0 z)
+    ]
+    [ (x, inp)
+    , (y, inp)
+    , (z, inp)
+    , (d0, matMul x z)
+    , (d1, matMul y z)
+    , (out, ewAdd d0 d1)
+    ]
+    (out, out)
+
+lemmaConvReluConstIConv :: Substitution
+lemmaConvReluConstIConv =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstIConv k)
+    , (out, conv2d k stride11 padSame actRelu x s0)
+    ]
+    [ (x, inp)
+    , (out, relu x)
     ]
     (out, out)
