@@ -2,16 +2,23 @@
 
 module Main where
 
-import Axioms (allSubs)
+import Axioms (allSubs, namedAllSubs, namedInvertibleSubs)
 import Control.DeepSeq (NFData, rnf)
 import Control.Parallel.Strategies (parMap, rdeepseq, rseq)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import IR.Graph (canonicalizeGraph, cseGraph, graphBindings)
+import IR.Graph (canonicalizeGraph, graphBindings)
 import IR.Isomorphic (isomorphicGraphs)
-import Search (SearchConfig(..), mutuallyReachableUnderSubstitutions, saturateUnderSubstitutions)
+import Search
+  ( SearchConfig(..)
+  , Derivation(..), DerivationStep(..), DerivationDirection(..)
+  , findDerivation, mutuallyReachableUnderSubstitutions
+  , saturateUnderSubstitutions
+  )
 import Substitutions.Substitution (Substitution(..))
 import Control.Monad (forM_, guard, when)
-import Data.List (elemIndex)
+import Data.List (elemIndex, intercalate)
+import Data.Maybe (isJust, fromJust)
 import System.Environment (getArgs)
 import TASO (loadSubstitutions, substitutions, substitutionsPath)
 
@@ -29,12 +36,16 @@ main = do
         i <- elemIndex "--map-report-indices" args
         guard (i + 1 < length args)
         traverse readMaybe (splitCommas (args !! (i + 1)))
+      recheckArgs = do
+        i <- elemIndex "--recheck" args
+        guard (i + 1 < length args)
+        traverse readMaybe (splitCommas (args !! (i + 1)))
 
   let searchConfig
         | quickReport =
             SearchConfig {maxDepth = 2, maxNumSteps = 50}
         | otherwise =
-            SearchConfig {maxDepth = 6, maxNumSteps = 18000}
+            SearchConfig {maxDepth = 5, maxNumSteps = 12000}
 
   rawSubstitutions <- loadSubstitutions
   allSubstitutions <- Set.toAscList <$> substitutions
@@ -45,8 +56,10 @@ main = do
       case mapReportIndexArgs of
         Just indices -> runMapReportIndices rawSubstitutions allSubstitutions indices
         Nothing -> putStrLn "Usage: --map-report-indices \"82,83,...\""
-    else
-      case traceIndex of
+    else case recheckArgs of
+      Just indices ->
+        runRecheck rawSubstitutions indices
+      _ -> case traceIndex of
         Just n | n >= 0 && n < total ->
           runTrace searchConfig (allSubstitutions !! n) n
         Just n ->
@@ -57,7 +70,7 @@ main = do
               runDumpLhsRhs allSubstitutions indices
             _ ->
               if reportMode || quickReport
-                then runFailureReport searchConfig allSubstitutions total quickReport
+                then runFailureReport searchConfig rawSubstitutions allSubstitutions total quickReport
                 else do
                   let results = parMap rseq (substitutionMatches searchConfig) allSubstitutions
                       !matched = length (filter id results)
@@ -85,8 +98,8 @@ runDumpLhsRhs allSubstitutions indices = do
       valid = filter (\n -> n >= 0 && n < total) indices
   forM_ valid $ \idx -> do
     let sub = allSubstitutions !! idx
-        srcCanon = canonicalizeGraph (cseGraph (subSrc sub))
-        dstCanon = canonicalizeGraph (cseGraph (subDst sub))
+        srcCanon = canonicalizeGraph (subSrc sub)
+        dstCanon = canonicalizeGraph (subDst sub)
     putStrLn ("========== Index " ++ show idx ++ " ==========")
     putStrLn "LHS (src) canonical:"
     mapM_ (putStrLn . ("  " ++) . showBinding) (graphBindings srcCanon)
@@ -123,6 +136,12 @@ readMaybe s = case reads s of
   [(a, "")] -> Just a
   _ -> Nothing
 
+buildFileIndexMap :: [Substitution] -> [Substitution] -> Int -> Int
+buildFileIndexMap rawSubs sortedSubs =
+  let m = Map.fromList [(sub, fi) | (fi, sub) <- zip [0..] rawSubs]
+      arr = [Map.findWithDefault (-1) sub m | sub <- sortedSubs]
+  in (arr !!)
+
 runTrace :: SearchConfig -> Substitution -> Int -> IO ()
 runTrace config sub idx = do
   putStrLn ("=== Trace for failing substitution index " ++ show idx ++ " ===\n")
@@ -131,8 +150,8 @@ runTrace config sub idx = do
       -- Use same limits as report for consistency
       srcReachable = saturateUnderSubstitutions src allSubs config
       dstReachable = saturateUnderSubstitutions dst allSubs config
-      srcCanon = canonicalizeGraph (cseGraph src)
-      dstCanon = canonicalizeGraph (cseGraph dst)
+      srcCanon = canonicalizeGraph src
+      dstCanon = canonicalizeGraph dst
 
   putStrLn "1. Exact equality (current match criterion)"
   putStrLn ("   dst `Set.member` srcReachable: " ++ show (dst `Set.member` srcReachable))
@@ -164,29 +183,35 @@ runTrace config sub idx = do
   where
     showBinding (t, e) = show t ++ " = " ++ show e
 
-runFailureReport :: SearchConfig -> [Substitution] -> Int -> Bool -> IO ()
-runFailureReport searchConfig allSubstitutions total quickReport = do
-  let indexed = zip [0 ..] allSubstitutions
-      matchResults =
+runFailureReport :: SearchConfig -> [Substitution] -> [Substitution] -> Int -> Bool -> IO ()
+runFailureReport searchConfig rawSubstitutions allSubstitutions total quickReport = do
+  let toFileIdx = buildFileIndexMap rawSubstitutions allSubstitutions
+      indexed = zip [0 ..] allSubstitutions
+      derivResults =
         parMap rseq
-          (\(i, sub) -> (i, mutuallyReachableUnderSubstitutions (subSrc sub) (subDst sub) allSubs searchConfig))
+          (\(i, sub) ->
+            let !d = findDerivation (subSrc sub) (subDst sub) namedAllSubs namedInvertibleSubs searchConfig
+            in (i, d))
           indexed
-      passed = [i | (i, True) <- matchResults]
-      failedIndices = [i | (i, False) <- matchResults]
+      passedWithDeriv = [(toFileIdx i, fromJust d) | (i, d) <- derivResults, isJust d]
+      failedIndices = [toFileIdx i | (i, d) <- derivResults, not (isJust d)]
       failed =
         parMap rdeepseq
-          (\i -> (i, substitutionMatchDetail searchConfig (allSubstitutions !! i)))
+          (\fi -> (fi, substitutionMatchDetail searchConfig (rawSubstitutions !! fi)))
           failedIndices
 
   let suffix = if quickReport then "-quick" else ""
       reportPath = "failure-report" ++ suffix ++ ".md"
       indicesPath = "failure-report-indices" ++ suffix ++ ".txt"
+      tracesPath = "derivation-traces" ++ suffix ++ ".txt"
   when quickReport $
     putStrLn "Using quick config (maxDepth=2, maxNumSteps=50); run without --report-quick for full report."
-  writeFile reportPath (buildReport total passed failed quickReport)
+  writeFile reportPath (buildReport total (map fst passedWithDeriv) failed quickReport)
   writeFile indicesPath (unlines (map (show . fst) failed))
-  putStrLn ("Matched: " ++ show (length passed) ++ " / " ++ show total)
+  writeFile tracesPath (buildTraces passedWithDeriv)
+  putStrLn ("Matched: " ++ show (length passedWithDeriv) ++ " / " ++ show total)
   putStrLn ("Failure report written to " ++ reportPath)
+  putStrLn ("Derivation traces written to " ++ tracesPath)
   putStrLn ("Failed indices (one per line) written to " ++ indicesPath)
   putStrLn ("Failed indices: " ++ unwords (map (show . fst) failed))
 
@@ -276,6 +301,42 @@ buildReport total passed failed quickReport =
       | otherwise =
           "—"
 
+runRecheck :: [Substitution] -> [Int] -> IO ()
+runRecheck allSubstitutions indices = do
+  let total = length allSubstitutions
+      valid = filter (\n -> n >= 0 && n < total) indices
+      config = SearchConfig {maxDepth = 8, maxNumSteps = 100000}
+  putStrLn ("Rechecking " ++ show (length valid) ++ " indices with depth="
+            ++ show (maxDepth config) ++ " steps=" ++ show (maxNumSteps config))
+  forM_ valid $ \idx -> do
+    let sub = allSubstitutions !! idx
+        result = findDerivation (subSrc sub) (subDst sub) namedAllSubs namedInvertibleSubs config
+    case result of
+      Nothing ->
+        putStrLn ("Index " ++ show idx ++ ": FAILED (no derivation found)")
+      Just deriv ->
+        let dir = case derivDirection deriv of
+              LhsToRhs -> "LHS -> RHS"
+              RhsToLhs -> "RHS -> LHS"
+            steps = derivSteps deriv
+            n = length steps
+            names = intercalate ", " (map stepAxiomName steps)
+        in putStrLn ("Index " ++ show idx ++ ": " ++ dir ++ " (" ++ show n ++ " steps) " ++ names)
+
+buildTraces :: [(Int, Derivation)] -> String
+buildTraces entries = unlines (map formatEntry entries)
+  where
+    formatEntry (i, deriv) =
+      let dir = case derivDirection deriv of
+            LhsToRhs -> "LHS -> RHS"
+            RhsToLhs -> "RHS -> LHS"
+          steps = derivSteps deriv
+          n = length steps
+          names = intercalate ", " (map stepAxiomName steps)
+      in "Index " ++ show i ++ ": " ++ dir ++ " (" ++ show n ++ " steps) " ++ names
+
 substitutionMatches :: SearchConfig -> Substitution -> Bool
 substitutionMatches searchConfig substitution =
-  mutuallyReachableUnderSubstitutions (subSrc substitution) (subDst substitution) allSubs searchConfig
+  mutuallyReachableUnderSubstitutions
+    (subSrc substitution) (subDst substitution)
+    namedAllSubs namedInvertibleSubs searchConfig

@@ -11,6 +11,7 @@ import Axioms
   , axiom22
   , axiom23
   , axiom25
+  , axiom25_3x3
   , axiom26
   , axiom27
   , axiom28
@@ -28,7 +29,7 @@ import Axioms
   , lemmaConstIConvLeft
   , lemmaConvConcatInput
   , lemmaLeftDistrib
-  , lemmaConvReluConstIConv
+  , lemmaConvReluConstIConv_3x3
   )
 import Control.Parallel.Strategies (runEval, rpar, rseq)
 import qualified Data.Set as Set
@@ -243,7 +244,7 @@ inverseConstIConvInsertionShouldBeReachableSpec =
             , (out, conv2d k33 stride11 padSame actNone x s0)
             ]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
-    expectMutuallyReachable startGraph targetGraph [axiom25, invertSubstitution axiom25] config
+    expectMutuallyReachable startGraph targetGraph [axiom25_3x3, invertSubstitution axiom25_3x3] config
 
 inverseConstImmInsertionShouldBeReachableSpec :: Spec
 inverseConstImmInsertionShouldBeReachableSpec =
@@ -417,7 +418,7 @@ leftConstIConvShouldCollapseToEnlargeSpec =
             , (out, enlarge k33 y)
             ]
         config = SearchConfig {maxDepth = 5, maxNumSteps = 1000}
-        axioms = [axiom21, invertSubstitution axiom21, axiom25, invertSubstitution axiom25, lemmaConstIConvLeft, invertSubstitution lemmaConstIConvLeft]
+        axioms = [axiom21, invertSubstitution axiom21, axiom25_3x3, invertSubstitution axiom25_3x3, lemmaConstIConvLeft, invertSubstitution lemmaConstIConvLeft]
     expectMutuallyReachable startGraph targetGraph axioms config
 
 sameKernelConvMergeShouldBeReachableSpec :: Spec
@@ -1031,7 +1032,7 @@ matmulIdentityWithDownstreamUseShouldBeReachableSpec =
             [ (x, inp)
             , (use, ewAdd x x)
             ]
-        config = SearchConfig {maxDepth = 4, maxNumSteps = 5000}
+        config = SearchConfig {maxDepth = 4, maxNumSteps = 10000}
     expectMutuallyReachable startGraph targetGraph allSubs config
 
 split0ConcatWithDownstreamUseShouldBeReachableSpec :: Spec
@@ -1118,7 +1119,7 @@ convReluConstIConvShortcutShouldBeReachableSpec =
             [ (x, inp)
             , (out, relu x)
             ]
-        subs = [lemmaConvReluConstIConv, invertSubstitution lemmaConvReluConstIConv]
+        subs = [lemmaConvReluConstIConv_3x3, invertSubstitution lemmaConvReluConstIConv_3x3]
         config = SearchConfig {maxDepth = 1, maxNumSteps = 10}
     expectMutuallyReachable startGraph targetGraph subs config
 
@@ -1164,7 +1165,7 @@ constIConvReluPairShouldReduceToReluPairSpec =
             , (d0, relu x)
             , (d1, relu y)
             ]
-        subs = [axiom22, invertSubstitution axiom22, axiom25, invertSubstitution axiom25]
+        subs = [axiom22, invertSubstitution axiom22, axiom25_3x3, invertSubstitution axiom25_3x3]
         config = SearchConfig {maxDepth = 6, maxNumSteps = 18000}
     expectMutuallyReachable startGraph targetGraph subs config
 
@@ -1186,7 +1187,7 @@ constIConvChainedReluShouldReduceSpec =
             , (d0, relu x)
             , (out, relu d0)
             ]
-        subs = [axiom22, invertSubstitution axiom22, axiom25, invertSubstitution axiom25]
+        subs = [axiom22, invertSubstitution axiom22, axiom25_3x3, invertSubstitution axiom25_3x3]
         config = SearchConfig {maxDepth = 6, maxNumSteps = 18000}
     expectMutuallyReachable startGraph targetGraph subs config
 

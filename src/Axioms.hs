@@ -5,71 +5,94 @@ import Short
 import Substitutions.Substitution
 
 fwdSubs :: [Substitution]
-fwdSubs =
-  [ axiom1
-  , axiom2
-  , axiom3
-  , axiom4
-  , axiom5
-  , axiom6
-  , axiom7
-  , axiom8
-  , axiom9
-  , axiom10
-  , axiom11
-  , axiom12
-  , axiom13
-  , axiom14a
-  , axiom14b
-  , axiom15
-  , axiom16
-  , axiom17
-  , axiom18
-  , axiom19
-  , axiom20
-  , axiom21
-  , axiom22
-  , axiom23
-  , axiom24
-  , axiom25
-  , axiom26
-  , axiom27
-  , axiom28
-  , axiom29
-  , axiom30
-  , axiom31
-  , axiom32
-  , axiom33
-  , axiom34
-  , axiom35
-  , axiom36
-  , axiom37
-  , axiom38
-  , axiom39
-  , axiom40
-  , axiom41
-  , axiom42
-  , axiom43
-  , axiom44a
-  , axiom44b
-  , lemmaTransposeConstImm
-  , lemmaLeftConstImm
-  , lemmaPool2dAvgConcatAxis0
-  , lemmaTransposeConcatAxis0
-  , lemmaMatMulConcatLeft
-  , lemmaConstIConvLeft
-  , lemmaConvConcatInput
-  , lemmaLeftDistrib
-  , lemmaConvReluConstIConv
-  ]
+fwdSubs = map snd namedFwdSubs
 
 bwdSubs :: [Substitution]
-bwdSubs =
-  map invertSubstitution $
-    filter (\sub -> sub /= axiom28 && sub /= axiom29) fwdSubs
+bwdSubs = map snd namedBwdSubs
 
 allSubs :: [Substitution]
-allSubs = fwdSubs ++ bwdSubs
+allSubs = map snd namedAllSubs
+
+invertibleSubs :: [Substitution]
+invertibleSubs = map snd namedInvertibleSubs
+
+namedFwdSubs :: [(String, Substitution)]
+namedFwdSubs =
+  [ ("axiom1", axiom1)
+  , ("axiom2", axiom2)
+  , ("axiom3", axiom3)
+  , ("axiom4", axiom4)
+  , ("axiom5", axiom5)
+  , ("axiom6", axiom6)
+  , ("axiom7", axiom7)
+  , ("axiom8", axiom8)
+  , ("axiom9", axiom9)
+  , ("axiom10", axiom10)
+  , ("axiom11", axiom11)
+  , ("axiom12", axiom12)
+  , ("axiom13", axiom13)
+  , ("axiom14a", axiom14a)
+  , ("axiom14b", axiom14b)
+  , ("axiom15", axiom15)
+  , ("axiom16", axiom16)
+  , ("axiom17", axiom17)
+  , ("axiom18", axiom18)
+  , ("axiom19", axiom19)
+  , ("axiom20", axiom20)
+  , ("axiom21", axiom21)
+  , ("axiom22", axiom22)
+  , ("axiom23", axiom23)
+  , ("axiom24", axiom24)
+  , ("axiom25", axiom25)
+  , ("axiom26", axiom26)
+  , ("axiom27", axiom27)
+  , ("axiom28", axiom28)
+  , ("axiom29", axiom29)
+  , ("axiom30", axiom30)
+  , ("axiom31", axiom31)
+  , ("axiom32", axiom32)
+  , ("axiom33", axiom33)
+  , ("axiom34", axiom34)
+  , ("axiom35", axiom35)
+  , ("axiom36", axiom36)
+  , ("axiom37", axiom37)
+  , ("axiom38", axiom38)
+  , ("axiom39", axiom39)
+  , ("axiom40", axiom40)
+  , ("axiom41", axiom41)
+  , ("axiom42", axiom42)
+  , ("axiom43", axiom43)
+  , ("axiom44a", axiom44a)
+  , ("axiom44b", axiom44b)
+  , ("lemmaTransposeConstImm", lemmaTransposeConstImm)
+  , ("lemmaLeftConstImm", lemmaLeftConstImm)
+  , ("lemmaPool2dAvgConcatAxis0", lemmaPool2dAvgConcatAxis0)
+  , ("lemmaTransposeConcatAxis0", lemmaTransposeConcatAxis0)
+  , ("lemmaMatMulConcatLeft", lemmaMatMulConcatLeft)
+  , ("lemmaConstIConvLeft", lemmaConstIConvLeft)
+  , ("lemmaConvConcatInput", lemmaConvConcatInput)
+  , ("lemmaLeftDistrib", lemmaLeftDistrib)
+  , ("lemmaConvReluConstIConv", lemmaConvReluConstIConv)
+  , ("axiom25_1x3", axiom25_1x3)
+  , ("axiom25_3x3", axiom25_3x3)
+  , ("lemmaConvReluConstIConv_1x3", lemmaConvReluConstIConv_1x3)
+  , ("lemmaConvReluConstIConv_3x3", lemmaConvReluConstIConv_3x3)
+  ]
+
+namedBwdSubs :: [(String, Substitution)]
+namedBwdSubs =
+  [ (name ++ "_inv", invertSubstitution sub)
+  | (name, sub) <- namedFwdSubs
+  , sub /= axiom28 && sub /= axiom29
+  , sub /= axiom25 && sub /= lemmaConvReluConstIConv
+  ]
+
+namedAllSubs :: [(String, Substitution)]
+namedAllSubs = namedFwdSubs ++ namedBwdSubs
+
+namedInvertibleSubs :: [(String, Substitution)]
+namedInvertibleSubs =
+  filter (\(_, sub) -> sub /= axiom28 && sub /= axiom29) namedAllSubs
 
 axiom1 :: Substitution
 axiom1 =
@@ -909,6 +932,52 @@ lemmaConvReluConstIConv =
     [ (x, inp)
     , (s0, ConstIConv k)
     , (out, conv2d k stride11 padSame actRelu x s0)
+    ]
+    [ (x, inp)
+    , (out, relu x)
+    ]
+    (out, out)
+
+axiom25_1x3 :: Substitution
+axiom25_1x3 =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstIConv (kernelLit 1 3))
+    , (out, conv2d (kernelLit 1 3) stride11 padSame actNone x s0)
+    ]
+    [ (x, inp)
+    ]
+    (out, x)
+
+axiom25_3x3 :: Substitution
+axiom25_3x3 =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstIConv (kernelLit 3 3))
+    , (out, conv2d (kernelLit 3 3) stride11 padSame actNone x s0)
+    ]
+    [ (x, inp)
+    ]
+    (out, x)
+
+lemmaConvReluConstIConv_1x3 :: Substitution
+lemmaConvReluConstIConv_1x3 =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstIConv (kernelLit 1 3))
+    , (out, conv2d (kernelLit 1 3) stride11 padSame actRelu x s0)
+    ]
+    [ (x, inp)
+    , (out, relu x)
+    ]
+    (out, out)
+
+lemmaConvReluConstIConv_3x3 :: Substitution
+lemmaConvReluConstIConv_3x3 =
+  mustSub
+    [ (x, inp)
+    , (s0, ConstIConv (kernelLit 3 3))
+    , (out, conv2d (kernelLit 3 3) stride11 padSame actRelu x s0)
     ]
     [ (x, inp)
     , (out, relu x)

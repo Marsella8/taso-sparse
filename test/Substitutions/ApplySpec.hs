@@ -3,14 +3,24 @@ module Substitutions.ApplySpec where
 import Control.Exception (evaluate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import IR.Graph (mustGraph)
+import Data.List (sort)
+import IR.Graph (Graph, mustGraph, canonicalizeGraph)
 import IR.IR
 import Short
-import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
+import Substitutions.Apply2 (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
 import Axioms (axiom9, axiom28, axiom29)
 import Substitutions.Substitution (mustSub, invertSubstitution)
-import Test.Hspec (Spec, errorCall, it, shouldBe, shouldThrow)
+import Test.Hspec (Spec, Expectation, errorCall, it, shouldBe, shouldThrow)
+
+shouldMatchIso :: [Graph] -> [Graph] -> Expectation
+shouldMatchIso actual expected =
+  sort (map canonicalizeGraph actual) `shouldBe` sort (map canonicalizeGraph expected)
+
+shouldContainIso :: Set.Set Graph -> Graph -> Expectation
+shouldContainIso gs expected =
+  any (\g -> canonicalizeGraph g == canonicalizeGraph expected) (Set.toList gs)
+    `shouldBe` True
 
 matchOf :: [(Tensor, Tensor)] -> [(Var, Term)] -> Match
 matchOf tensorBindings termBindings =
@@ -99,7 +109,7 @@ split0ConcatReducesToFirstArgSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom28 match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 split1ConcatReducesToSecondArgSpec :: Spec
 split1ConcatReducesToSecondArgSpec =
@@ -125,7 +135,7 @@ split1ConcatReducesToSecondArgSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom29 match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 split0ConcatWithDownstreamUsersSpec :: Spec
 split0ConcatWithDownstreamUsersSpec =
@@ -153,7 +163,7 @@ split0ConcatWithDownstreamUsersSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom28 match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 split0ConcatViaApplySubstitutionSpec :: Spec
 split0ConcatViaApplySubstitutionSpec =
@@ -178,7 +188,7 @@ multiOutputSourceSubstitutionRejectedSpec =
             , (y, inp)
             ]
     evaluate (Set.size (applySubstitution targetGraph inv28))
-      `shouldThrow` errorCall "applySubstitution: substitutions with multiple source outputs are unsupported"
+      `shouldThrow` errorCall "matchSubstitution: substitutions with multiple source outputs are unsupported"
 
 nonInjectiveInternalMatchProducesCorrectResultSpec :: Spec
 nonInjectiveInternalMatchProducesCorrectResultSpec =
@@ -216,7 +226,7 @@ nonInjectiveInternalMatchProducesCorrectResultSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputMatchingNonInputTargetProducesCorrectResultSpec :: Spec
 sourceInputMatchingNonInputTargetProducesCorrectResultSpec =
@@ -249,7 +259,7 @@ sourceInputMatchingNonInputTargetProducesCorrectResultSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 deepSourceInputMatchingChainedTargetProducesCorrectResultSpec :: Spec
 deepSourceInputMatchingChainedTargetProducesCorrectResultSpec =
@@ -285,7 +295,7 @@ deepSourceInputMatchingChainedTargetProducesCorrectResultSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 rewriteWithSharedTargetNodeProducesCorrectSharingSpec :: Spec
 rewriteWithSharedTargetNodeProducesCorrectSharingSpec =
@@ -322,7 +332,7 @@ rewriteWithSharedTargetNodeProducesCorrectSharingSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 rewriteDoesNotInventBindingsSpec :: Spec
 rewriteDoesNotInventBindingsSpec =
@@ -366,8 +376,7 @@ contextRefsToOutputArePreservedAcrossRewriteSpec =
             , (z, relu out)
             , (w, transpose out)
             ]
-        correct =
-          Set.singleton $
+        expected =
             mustGraph
               [ (x, inp)
               , (y, inp)
@@ -376,7 +385,7 @@ contextRefsToOutputArePreservedAcrossRewriteSpec =
               , (w, transpose out)
               ]
         output = applySubstitution targetGraph axiom
-    output `shouldBe` correct
+    shouldContainIso output expected
 
 identityInputRewriteLeavesGraphUnchangedSpec :: Spec
 identityInputRewriteLeavesGraphUnchangedSpec =
@@ -397,7 +406,7 @@ identityInputRewriteLeavesGraphUnchangedSpec =
               [(x, inp)]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 identicalUnaryRewriteLeavesGraphUnchangedSpec :: Spec
 identicalUnaryRewriteLeavesGraphUnchangedSpec =
@@ -428,7 +437,7 @@ identicalUnaryRewriteLeavesGraphUnchangedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 identicalBinaryRewriteLeavesGraphUnchangedSpec :: Spec
 identicalBinaryRewriteLeavesGraphUnchangedSpec =
@@ -464,7 +473,7 @@ identicalBinaryRewriteLeavesGraphUnchangedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 simpleUnaryRewriteReplacesMatchedBindingSpec :: Spec
 simpleUnaryRewriteReplacesMatchedBindingSpec =
@@ -495,7 +504,7 @@ simpleUnaryRewriteReplacesMatchedBindingSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 simpleUnaryRewritePreservesDownstreamUsersSpec :: Spec
 simpleUnaryRewritePreservesDownstreamUsersSpec =
@@ -528,7 +537,7 @@ simpleUnaryRewritePreservesDownstreamUsersSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 missingSourceInputBindingRejectedSpec :: Spec
 missingSourceInputBindingRejectedSpec =
@@ -552,7 +561,7 @@ missingSourceInputBindingRejectedSpec =
             [(out, out)]
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 missingSourceOutputBindingRejectedSpec :: Spec
 missingSourceOutputBindingRejectedSpec =
@@ -576,7 +585,7 @@ missingSourceOutputBindingRejectedSpec =
             [(x, x)]
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 missingSharedScalarBindingRejectedSpec :: Spec
 missingSharedScalarBindingRejectedSpec =
@@ -603,7 +612,7 @@ missingSharedScalarBindingRejectedSpec =
             []
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 extraTensorBindingRejectedSpec :: Spec
 extraTensorBindingRejectedSpec =
@@ -630,7 +639,7 @@ extraTensorBindingRejectedSpec =
             ]
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 extraTermBindingRejectedSpec :: Spec
 extraTermBindingRejectedSpec =
@@ -657,7 +666,7 @@ extraTermBindingRejectedSpec =
             [(scalarVar "w", ScalarTm (scalarLit 2))]
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 illSortedScalarBindingRejectedSpec :: Spec
 illSortedScalarBindingRejectedSpec =
@@ -684,7 +693,7 @@ illSortedScalarBindingRejectedSpec =
             [(scalarVar "w", AxisTm axis0)]
         correct = []
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 structurallyInvalidTensorMatchRejectedSpec :: Spec
 structurallyInvalidTensorMatchRejectedSpec =
@@ -769,7 +778,7 @@ danglingInternalUseRejectedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 multipleDanglingUsesRejectedSpec :: Spec
 multipleDanglingUsesRejectedSpec =
@@ -808,7 +817,7 @@ multipleDanglingUsesRejectedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 aliasedSourceInputsRewriteToSameTargetInputSpec :: Spec
 aliasedSourceInputsRewriteToSameTargetInputSpec =
@@ -842,7 +851,7 @@ aliasedSourceInputsRewriteToSameTargetInputSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 aliasedSourceInputsRewriteToSameConcreteTensorSpec :: Spec
 aliasedSourceInputsRewriteToSameConcreteTensorSpec =
@@ -876,7 +885,7 @@ aliasedSourceInputsRewriteToSameConcreteTensorSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 distinctSourceInternalsMayAliasSameTargetInternalSpec :: Spec
 distinctSourceInternalsMayAliasSameTargetInternalSpec =
@@ -915,7 +924,7 @@ distinctSourceInternalsMayAliasSameTargetInternalSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputMayAliasMatchedInternalTargetTensorSpec :: Spec
 sourceInputMayAliasMatchedInternalTargetTensorSpec =
@@ -948,7 +957,7 @@ sourceInputMayAliasMatchedInternalTargetTensorSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputAndMatchedInternalAliasingRejectsRewriteSpec :: Spec
 sourceInputAndMatchedInternalAliasingRejectsRewriteSpec =
@@ -991,7 +1000,7 @@ sourceInputAndMatchedInternalAliasingRejectsRewriteSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sharedScalarLiteralInstantiatedSpec :: Spec
 sharedScalarLiteralInstantiatedSpec =
@@ -1023,7 +1032,7 @@ sharedScalarLiteralInstantiatedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 nestedScalarExpressionInstantiatedSpec :: Spec
 nestedScalarExpressionInstantiatedSpec =
@@ -1059,7 +1068,7 @@ nestedScalarExpressionInstantiatedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 repeatedDestinationScalarUsesInstantiateConsistentlySpec :: Spec
 repeatedDestinationScalarUsesInstantiateConsistentlySpec =
@@ -1091,7 +1100,7 @@ repeatedDestinationScalarUsesInstantiateConsistentlySpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 scalarInstantiationIsAtomicAcrossSwappedBindingsSpec :: Spec
 scalarInstantiationIsAtomicAcrossSwappedBindingsSpec =
@@ -1125,7 +1134,7 @@ scalarInstantiationIsAtomicAcrossSwappedBindingsSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationOnlyScalarVariableRemainsAbstractSpec :: Spec
 destinationOnlyScalarVariableRemainsAbstractSpec =
@@ -1157,7 +1166,7 @@ destinationOnlyScalarVariableRemainsAbstractSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 deeplyNestedScalarExpressionInstantiatedSpec :: Spec
 deeplyNestedScalarExpressionInstantiatedSpec =
@@ -1193,7 +1202,7 @@ deeplyNestedScalarExpressionInstantiatedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 axisLiteralInstantiatedSpec :: Spec
 axisLiteralInstantiatedSpec =
@@ -1230,7 +1239,7 @@ axisLiteralInstantiatedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 axisVariableInstantiatedSpec :: Spec
 axisVariableInstantiatedSpec =
@@ -1268,7 +1277,7 @@ axisVariableInstantiatedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 convTermsInstantiateTogetherSpec :: Spec
 convTermsInstantiateTogetherSpec =
@@ -1311,7 +1320,7 @@ convTermsInstantiateTogetherSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationInternalFreshenedEvenWithoutCollisionSpec :: Spec
 destinationInternalFreshenedEvenWithoutCollisionSpec =
@@ -1344,7 +1353,7 @@ destinationInternalFreshenedEvenWithoutCollisionSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationInternalCollisionWithExternalTargetTensorSpec :: Spec
 destinationInternalCollisionWithExternalTargetTensorSpec =
@@ -1381,7 +1390,7 @@ destinationInternalCollisionWithExternalTargetTensorSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec :: Spec
 destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec =
@@ -1416,7 +1425,7 @@ destinationInputRewiringDoesNotGetCapturedByInternalFresheningSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationMultipleInternalCollisionsSkipExistingRNamesSpec :: Spec
 destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
@@ -1455,7 +1464,7 @@ destinationMultipleInternalCollisionsSkipExistingRNamesSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec :: Spec
 destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec =
@@ -1490,7 +1499,7 @@ destinationInternalNamedLikeMatchedOutputRenamedAtomicallySpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec :: Spec
 destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec =
@@ -1525,7 +1534,7 @@ destinationInternalsAlreadyNamedFreshCandidatesAreRefreshedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 unrelatedDisconnectedTargetBindingsPreservedSpec :: Spec
 unrelatedDisconnectedTargetBindingsPreservedSpec =
@@ -1560,7 +1569,7 @@ unrelatedDisconnectedTargetBindingsPreservedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputAliasesInternalBindingPreservedSpec :: Spec
 sourceInputAliasesInternalBindingPreservedSpec =
@@ -1598,7 +1607,7 @@ sourceInputAliasesInternalBindingPreservedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputAliasesInternalWithDstInternalsSpec :: Spec
 sourceInputAliasesInternalWithDstInternalsSpec =
@@ -1638,7 +1647,7 @@ sourceInputAliasesInternalWithDstInternalsSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 sourceInputAliasesInternalSurvivingRefPreservedSpec :: Spec
 sourceInputAliasesInternalSurvivingRefPreservedSpec =
@@ -1678,7 +1687,7 @@ sourceInputAliasesInternalSurvivingRefPreservedSpec =
               ]
           ]
         output = applyMatchedSubstitution targetGraph axiom match
-    output `shouldBe` correct
+    output `shouldMatchIso` correct
 
 inverseDoubleTransposeOccurrenceLocalSpec :: Spec
 inverseDoubleTransposeOccurrenceLocalSpec =
@@ -1691,14 +1700,13 @@ inverseDoubleTransposeOccurrenceLocalSpec =
             , (out, matMul x s0)
             ]
         output = applySubstitution targetGraph axiom
-    Set.member
+    shouldContainIso output
       (mustGraph
         [ (x, inp)
         , (s0, transpose x)
         , (t "r1", transpose s0)
         , (out, matMul (t "r1") s0)
         ])
-      output `shouldBe` True
 
 split0PassThroughRemovesDanglingSourceInputSpec :: Spec
 split0PassThroughRemovesDanglingSourceInputSpec =
@@ -1736,4 +1744,4 @@ split0PassThroughRemovesDanglingSourceInputSpec =
             , (t5, matMul t3 t4)
             ]
         output = applySubstitution targetGraph axiom28
-    Set.member expected output `shouldBe` True
+    shouldContainIso output expected

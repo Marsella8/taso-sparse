@@ -2,7 +2,7 @@ module Main where
 
 import Axioms
 import qualified Data.Set as Set
-import IR.Graph (Graph, mustGraph, graphBindings, canonicalizeGraph, cseGraph)
+import IR.Graph (Graph, mustGraph, graphBindings, canonicalizeGraph)
 import IR.IR (Expr(..))
 import IR.Isomorphic (isomorphicGraphs)
 import Search (SearchConfig(..), saturateUnderSubstitutions)
@@ -39,7 +39,7 @@ showGraph :: Graph -> String
 showGraph g = unlines [show t ++ " = " ++ show e | (t, e) <- graphBindings g]
 
 showCanon :: Graph -> String
-showCanon = showGraph . canonicalizeGraph . cseGraph
+showCanon = showGraph . canonicalizeGraph
 
 debugTest1 :: IO ()
 debugTest1 = do

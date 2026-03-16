@@ -39,8 +39,8 @@ newtype Graph = Graph (Map.Map Tensor Expr)
 
 mkGraph :: [(Tensor, Expr)] -> Maybe Graph
 mkGraph bindings = do
-  guard (Map.size m == length bindings) -- no duplicate bindings
-  guard (Set.null freeVars) -- no free variables
+  guard (Map.size m == length bindings)
+  guard (Set.null freeVars)
   guard (isAcyclic m)
   Just (Graph (addOutputNodes m))
   where
@@ -255,7 +255,10 @@ instantiateGraphTerms graph@(Graph g) instantiateMap =
     else error "Invalid term instantiation map"
 
 canonicalizeGraph :: Graph -> Graph
-canonicalizeGraph g =
+canonicalizeGraph = canonicalRename . cseGraph
+
+canonicalRename :: Graph -> Graph
+canonicalRename g =
   case graphRename renameMap (graphRestrictKeys reachable g) of
     Just g' -> g'
     Nothing -> error "canonicalizeGraph: internal error"
