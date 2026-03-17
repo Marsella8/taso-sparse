@@ -1,10 +1,11 @@
 % Use draft for fast compile while editing; remove for final PDF
-\documentclass[draft,sigplan,10pt,nonacm]{acmart}
+\documentclass[sigplan,10pt,nonacm]{acmart}
 
 \AtBeginDocument{%
 \providecommand\BibTeX{{Bib\TeX}}}
 
 \usepackage{tikz}
+\usepackage{graphicx}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric}
 
 \title{Recovering TASO Substitutions Under Bounded Rewrite Closure}
@@ -22,25 +23,38 @@
 \begin{document}
 
 \begin{abstract}
-Machine learning compilers have emerged in recent years as a major tool for automatically optimizing the performance of deep learning models. A major component of this optimization pipeline is \textbf{algebraic rewriting}. In algebraic rewriting, given a set of substitutions, the compiler repeatedly applies these substitutions to the model in order to minimize some cost metric, such as runtime.
+Machine learning compilers have emerged in recent years as a major tool for automatically optimizing the performance of deep learning models. A major component of this optimization pipeline is algebraic rewriting, where a compiler repeatedly applies graph substitutions to transform a model into an equivalent but more efficient form.
 
-In several modern compilers, these substitutions are hard-coded. However, more recent approaches such as TASO aim to automatically discover them from a starting set of base axioms. In this paper, we study the following question: given a sufficiently expressive rewrite system, is it possible to recover, as compositions of the base TASO axioms, the substitutions discovered by TASO?
+In several modern systems, these substitutions are hand-written. TASO showed that many useful substitutions can instead be \emph{discovered} automatically by enumerating candidate graph pairs and then formally verifying the valid ones using a smaller set of base operator axioms. In this paper, we study the converse question: once such substitutions have been discovered, are they already derivable as explicit compositions of the base TASO axioms inside a rewrite system? 
 
-To answer this question, we implement a bidirectional rewrite system over a symbolic graph IR. Our system is able to recover over 95\% of the TASO substitutions, suggesting that most of them can be derived from a comparatively small axiom basis rather than treated as independent primitive rules.
+To answer this question, we implement an explicit graph rewrite engine over a symbolic graph IR, together with bounded meet-in-the-middle search and derivation-trace reconstruction. Evaluated on 444 non-isomorphic substitutions extracted from the TASO implementation, our system recovers $97.3\%$ of them, with most derivations requiring only a small number of rewrite steps. These results suggest that the large majority of TASO's substitutions are not independent primitive rules, but derived consequences of a comparatively small axiom basis.
 \end{abstract}
 \maketitle
 
+% \section{Introduction}
+% Machine learning compilers have become a central part of the deep learning software stack. Their role is not only to lower models to kernels, but also to transform computation graphs into equivalent forms that execute more efficiently on the target hardware. At this level, one of the most important optimization mechanisms is algebraic rewriting: replacing a subgraph with a semantically equivalent one that yields lower cost under some objective, such as runtime, memory traffic, or communication volume. As deep learning systems have grown larger, more heterogeneous, and more distributed, the quality of these graph-level transformations has become increasingly important.
+
+% A traditional way to build such optimizers is to hand-design a collection of graph substitutions. This requires substantial manual effort, scales poorly as the operator set grows, and makes it difficult to understand how much of the optimizer's behavior is really grounded in a small trusted semantic core. TASO addressed part of this problem by showing that useful graph substitutions can be generated automatically from a base set of operator axioms, then formally verified before being used in optimization~\cite{jia2019taso}. For the optimization step, TASO keeps a working set of equivalent graphs, sorted in order of cost, and greedily applies substitutions to the lowest cost graph for a predefined number of steps.
+
+% Subsequent work focused largely on how to search more effectively over the space induced by such substitutions. MetaFlow observed that restricting attention to immediately profitable rewrites can be too limiting, and introduced relaxed graph substitutions that allow performance-decreasing intermediate steps in order to reach better final graphs~\cite{jia2019relaxed}. TENSAT instead performs equality saturation to compactly represent the equivalent graphs at once and thereby alleviate the phase-ordering problems of sequential rewriting~\cite{yang2021equality,willsey2021egg}. Unity extended the same perspective to distributed training, representing both algebraic transformations and parallelization choices as substitutions over a unified parallel computation graph~\cite{unger2022unity}. The effectveiness of these systems suggests that having a general framework for gneerating and applying substitutions outperforms hand-designed ones.
+
+% This paper studies a complementary question. Rather than asking how to discover substitutions, or how to search over them once they are known, we ask whether, for some sufficiently powerful rewrite system, the substitutions discovered by TASO are already implicit in the bounded rewrite closure of TASO's own base axioms. This question matters for both methodology and engineering. If most discovered substitutions are derivable, then they can be viewed as lemmas induced by a comparatively small trusted core, rather than as independent primitive facts. If they are not derivable, then the gap points to limitations in the rewrite framework used to explore them.
+
+% To investigate this question, we implement a bidirectional rewrite system over a symbolic graph IR and use it to reconstruct TASO substitutions under bounded rewrite closure. Our investigation leads to a rewrite system that is able to handle several adversarial cases, including surjective variable matching, tensor aliasing, dead node elimination, and multi-output matching. Using this system, we recover over 95\% of the substitutions discovered by TASO. Beyond the headline number, the reconstruction process also provides a structural view of the substitution set itself: many substitutions emerge naturally as short derived lemmas, some require unexpectedly long derivations, and a small residual set appears to lie outside the closure induced by the current axiom basis.
+
 \section{Introduction}
-Machine learning compilers have become a central part of the deep learning software stack. Their role is not only to lower models to kernels, but also to transform computation graphs into equivalent forms that execute more efficiently on the target hardware. At this level, one of the most important optimization mechanisms is algebraic rewriting: replacing a subgraph with a semantically equivalent one that yields lower cost under some objective, such as runtime, memory traffic, or communication volume. As deep learning systems have grown larger, more heterogeneous, and more distributed, the quality of these graph-level transformations has become increasingly important.
 
-A traditional way to build such optimizers is to hand-design a collection of graph substitutions. This requires substantial manual effort, scales poorly as the operator set grows, and makes it difficult to understand how much of the optimizer's behavior is really grounded in a small trusted semantic core. TASO addressed part of this problem by showing that useful graph substitutions can be generated automatically from a base set of operator axioms, then formally verified before being used in optimization~\cite{jia2019taso}. For the optimization step, TASO keeps a working set of equivalent graphs, sorted in order of cost, and greedily applies substitutions to the lowest cost graph for a predefined number of steps.
+Machine learning compilers have become a central part of the deep learning software stack. Their role is not only to lower models to kernels, but also to transform computation graphs into equivalent forms that execute more efficiently on the target hardware. At this level, one of the most important optimization mechanisms is algebraic rewriting: replacing a subgraph with a semantically equivalent one that yields lower cost under some objective such as runtime, memory traffic, or communication volume.
 
-Subsequent work focused largely on how to search more effectively over the space induced by such substitutions. MetaFlow observed that restricting attention to immediately profitable rewrites can be too limiting, and introduced relaxed graph substitutions that allow performance-decreasing intermediate steps in order to reach better final graphs~\cite{jia2019relaxed}. TENSAT instead performs equality saturation to compactly represent the equivalent graphs at once and thereby alleviate the phase-ordering problems of sequential rewriting~\cite{yang2021equality,willsey2021egg}. Unity extended the same perspective to distributed training, representing both algebraic transformations and parallelization choices as substitutions over a unified parallel computation graph~\cite{unger2022unity}. The effectveiness of these systems suggests that having a general framework for gneerating and applying substitutions outperforms hand-designed ones.
+A traditional way to build such optimizers is to hand-design a collection of graph substitutions. This requires substantial manual effort, scales poorly as the operator set grows, and forces the compiler writer to treat a large collection of rewrites as primitive trusted knowledge. TASO addressed part of this problem by showing that useful substitutions can instead be discovered automatically from a smaller set of base operator axioms, then formally verified before being used in optimization~\cite{jia2019taso}. This naturally leads to a further question: once TASO has discovered such substitutions, how many of them are already obtainable by repeatedly composing the original axioms inside an explicit rewrite system?
 
-This paper studies a complementary question. Rather than asking how to discover substitutions, or how to search over them once they are known, we ask whether, for some sufficiently powerful rewrite system, the substitutions discovered by TASO are already implicit in the bounded rewrite closure of TASO's own base axioms. This question matters for both methodology and engineering. If most discovered substitutions are derivable, then they can be viewed as lemmas induced by a comparatively small trusted core, rather than as independent primitive facts. If they are not derivable, then the gap points to limitations in the rewrite framework used to explore them.
+This paper studies that question directly. Rather than using SMT-based validation to prove candidate substitutions correct, we ask whether the substitutions discovered by TASO can be reconstructed as concrete rewrite derivations from TASO's base axioms. Framed this way, the issue is not whether the substitutions are valid, but whether they are already implicit in the smaller axiom set. If most of TASO's substitutions are recoverable in this sense, then a large part of the optimizer's rewrite knowledge can be understood as derived from a compact trusted core, rather than as a long list of independent primitive rules.
 
-To investigate this question, we implement a bidirectional rewrite system over a symbolic graph IR and use it to reconstruct TASO substitutions under bounded rewrite closure. Our investigation leads to a rewrite system that is able to handle several adversarial cases, including surjective variable matching, tensor aliasing, dead node elimination, and multi-output matching. Using this system, we recover over 95\% of the substitutions discovered by TASO. Beyond the headline number, the reconstruction process also provides a structural view of the substitution set itself: many substitutions emerge naturally as short derived lemmas, some require unexpectedly long derivations, and a small residual set appears to lie outside the closure induced by the current axiom basis.
-\section{Motivation, Background, and Related Work}
+To investigate this, we implement an explicit graph rewrite engine over a symbolic SSA-style graph IR [maybe don't use this]. Our system supports substitution matching and application on arbitrary subgraphs, structural canonicalization for efficient deduplication, and bounded meet-in-the-middle search with derivation-trace reconstruction. We evaluate it on 444 non-isomorphic substitutions extracted from the TASO implementation, and under our search configuration recover 432 of them, or $97.3\%$. The recovered derivations are typically short, with median length 2 and maximum length 6. These results provide direct evidence that the large majority of TASO's discovered substitutions are already derivable from a comparatively small axiom basis.
+
+
+
+% \section{Motivation, Background, and Related Work}
 
 % Cite TASO, Tensat, Unity papers.
 % TASO operates as follows:
@@ -54,233 +68,360 @@ To investigate this question, we implement a bidirectional rewrite system over a
 % axioms) that substituting one graph for the other is sound.
 % The resulting proven substitutions can then be plugged into any graph-substitution engine and used to optimize a given input graph.
 
-Showing that TASO subsittuiosn are recoverable directly as a rewrite composition of the base axioms would significnatly simplify the compiler pipeline: rather than a separate subsystem to discover these substitutions and then a graph rewrite engine to apply them, one could simply directly use the rewrite system and the axioms instead.
+% Showing that TASO subsittuiosn are recoverable directly as a rewrite composition of the base axioms would significnatly simplify the compiler pipeline: rather than a separate subsystem to discover these substitutions and then a graph rewrite engine to apply them, one could simply directly use the rewrite system and the axioms instead.
 
-TODO (e.g., TASO~\cite{jia2019taso})
+% TODO (e.g., TASO~\cite{jia2019taso})
+
+\section{Motivation, and Related Work}
+\label{sec:background}
+
+TASO is the most direct starting point for our work. Its goal is not merely to \emph{apply} graph substitutions efficiently, but to \emph{generate} them automatically from a smaller semantic basis~\cite{jia2019taso}. It begins from a fixed set of supported operators together with a collection of base axioms describing their equivalences. It then enumerates candidate graphs up to a chosen size bound, groups together graphs that appear equivalent under randomized testing, and uses formal verification to prove which pairs in the same candidate class are in fact sound substitutions. The result is a library of verified graph rewrites that can then be handed to an optimizer. In other words, TASO factors the optimization pipeline into two stages: an offline discovery-and-verification stage that produces substitutions, and a later rewrite stage that applies them to optimize a given model.
+
+Subsequent work has mostly focused on the second of these stages, namely how to search more effectively through the space induced by a set of known rewrites. MetaFlow observes that restricting attention to immediately profitable rewrites can be too limiting, and therefore allows relaxed substitutions that may take locally worse intermediate steps in order to reach better final graphs~\cite{jia2019relaxed}. TENSAT instead uses equality saturation to represent many equivalent graphs simultaneously inside an e-graph, thereby reducing the phase-ordering problems of sequential rewriting~\cite{yang2021equality,willsey2021egg}. Unity extends this viewpoint to distributed training, where both algebraic rewrites and parallelization choices are represented in a unified optimization space over parallel computation graphs~\cite{unger2022unity}. These systems differ in representation and search strategy, but they share the same general perspective: the substitution set is taken as given, and the main question is how best to exploit it.
+
+Our motivation is to look one level earlier. If the substitutions discovered by TASO are already recoverable directly as compositions of the base axioms, then the compiler pipeline can in principle be simplified. Rather than having one subsystem whose job is to discover a large set of derived substitutions and another whose job is to apply them, one could instead work directly with the rewrite system induced by the original axioms. This is attractive not only because the system becomes conceptually simpler, but also because soundness comes for free from the axioms themselves: any substitution obtained by composing sound rewrites is sound, so there is no need to separately verify each recovered rule. Even if this is not always the most practical implementation strategy, recoverability is still conceptually important. It tells us whether the discovered substitutions should be viewed as a large collection of independent primitive facts, or instead as lemmas generated by a comparatively small trusted core.
+
+This is the perspective we take in this paper. We treat TASO's discovered substitutions as an empirical target and ask how much of that target can already be generated by the axiom basis alone. In this way, the substitution set becomes a way of measuring the expressive power of the underlying axioms, rather than only the output of a discovery procedure.
+
+% \section{Approach and Implementation}
+% \subsection{IR}
+
+% The core data structure of the IR is the `Graph` type, which is a set of bindings between tensor variables and expressions, expressed an SSA-style term graph.
+% Each expression represents some operator which takes in both tensor variables and non-tensor terms (such as scalars, strides, ...) as inputs, and produces a single tensor as output.
+% The non tensor terms can be both variables or specific concrete values.
+% `Input` and `Output` are special operators, which denote which tensor vairables are inputs and outputs of the graph.
+
+% The following is a possible graph expressible in the IR:
+
+% \begin{verbatim}
+% x = Input()
+% y = Transpose(x)
+% z = Mul(y, alpha)
+% w = MatMul(y, z)
+% o = Output(w)
+% \end{verbatim}
+
+% \begin{figure}[t]
+% \centering
+% \begin{tikzpicture}[
+%   >=Latex,
+%   node distance=5mm and 10mm,
+%   tensor/.style={draw, circle, minimum size=8mm, inner sep=0pt},
+%   op/.style={draw, rounded corners, minimum width=16mm, minimum height=7mm, align=center},
+%   term/.style={draw, ellipse, minimum width=11mm, minimum height=7mm, inner sep=1pt}
+% ]
+% \node[tensor] (x) {$x$};
+% \node[op, below=of x] (transpose) {Transpose};
+% \node[tensor, below=of transpose] (y) {$y$};
+
+% \node[op, below left=15mm and 13mm of y] (mul) {Mul};
+% % \node[term, left=of mul] (alpha) {$\alpha$};
+% \node[tensor, below=of mul] (z) {$z$};
+
+% \node[op, below right=15mm and 13mm of y] (matmul) {MatMul};
+% \node[tensor, below=of matmul] (w) {$w$};
+
+% \node[op, below=of w] (output) {Output};
+% \node[tensor, below=of output] (o) {$o$};
+
+% \draw[->] (x) -- (transpose);
+% \draw[->] (transpose) -- (y);
+% \draw[->] (y) -- (mul);
+% % \draw[->] (alpha) -- (mul);
+% \draw[->] (mul) -- (z);
+% \draw[->] (y) -- (matmul);
+% \draw[->] (z) -- (matmul);
+% \draw[->] (matmul) -- (w);
+% \draw[->] (w) -- (output);
+% \draw[->] (output) -- (o);
+% \end{tikzpicture}
+% \label{fig:ir-example}
+% \end{figure}
+
+% \subsection{Axioms}
+
+% Axioms are encoded as substitutions between two graphs: a source graph (the LHS of the substitution) and a destination graph (the RHS of the substitution).
+% This representation alone is not sufficient, because we must also specify how boundary tensors (the inputs and outputs of the graph) correspond across the two sides.
+% Each axiom therefore additionally stores a bijection between source and destination inputs, and a bijection between source and destination outputs.
+
+% For example, consider the substitution
+% \[
+% \forall x,y,z.\;
+% \mathsf{EwAdd}(\mathsf{MatMul}(x,y), \mathsf{MatMul}(x,z))
+% =
+% \mathsf{MatMul}(x,\mathsf{EwAdd}(y,z)).
+% \]
+% Here $x,y,z$ are input tensors, \texttt{MatMul} denotes matrix multiplication, and \texttt{EwAdd} denotes element-wise addition.
+
+% \begin{figure}[t]
+% \centering
+% \begin{tikzpicture}[
+%   >=Latex,
+%   tensor/.style={draw, circle, minimum size=8mm, inner sep=0pt},
+%   op/.style={draw, rounded corners, minimum width=18mm, minimum height=8mm, align=center}
+% ]
+% \node at (-33mm, 22mm) {\textbf{src}};
+% \node[tensor] (xL) at (-48mm, 12mm) {$x$};
+% \node[tensor] (yL) at (-34mm, 12mm) {$y$};
+% \node[tensor] (zL) at (-18mm, 12mm) {$z$};
+% \node[op] (mm1L) at (-42mm, -2mm) {MatMul};
+% \node[op] (mm2L) at (-24mm, -2mm) {MatMul};
+% \node[op] (addL) at (-33mm, -17mm) {EwAdd};
+% \node[tensor] (outL) at (-33mm, -31mm) {$out$};
+% \draw[->] (xL) -- (mm1L);
+% \draw[->] (yL) -- (mm1L);
+% \draw[->] (xL) -- (mm2L);
+% \draw[->] (zL) -- (mm2L);
+% \draw[->] (mm1L) -- (addL);
+% \draw[->] (mm2L) -- (addL);
+% \draw[->] (addL) -- (outL);
+
+% \node at (0mm, -6mm) {$\Longrightarrow$};
+
+% \node at (33mm, 22mm) {\textbf{dst}};
+% \node[tensor] (xR) at (20mm, 12mm) {$x$};
+% \node[tensor] (yR) at (34mm, 12mm) {$y$};
+% \node[tensor] (zR) at (48mm, 12mm) {$z$};
+% \node[op] (addR) at (41mm, -2mm) {EwAdd};
+% \node[op] (mmR) at (28mm, -17mm) {MatMul};
+% \node[tensor] (outR) at (28mm, -31mm) {$out$};
+% \draw[->] (yR) -- (addR);
+% \draw[->] (zR) -- (addR);
+% \draw[->] (xR) -- (mmR);
+% \draw[->] (addR) -- (mmR);
+% \draw[->] (mmR) -- (outR);
+% \end{tikzpicture}
+% \label{fig:axiom-matmul-factor}
+% \end{figure}
+
+% \subsection{Substitution Matching}
+
+% Graph rewriting has two components: matching and application.
+% In the matching phase, we are given a target graph and a substitution, and we enumerate all valid occurrences of the substitution source inside the target.
+% Each successful match is represented as a surjective mapping from tensors in the substitution source graph to tensors in a target subgraph.
+
+% Matching starts by pairing an output tensor of the substitution source with a candidate tensor in the target graph.
+% We then recursively expand this pair under the following rules:
+% \begin{itemize}
+% \item If the source tensor is an input tensor, matching succeeds immediately (it may bind to either an input or an internal tensor in the target).
+% \item If the source tensor is internal but the target tensor is an input tensor, matching fails.
+% \item If both tensors are internal, their producing expressions must agree (same operator and compatible arguments). If they do not agree, matching fails.
+% \item If the expressions agree, we recursively match each corresponding pair of operand tensors.
+% \end{itemize}
+% During this recursion we maintain and extend a partial match mapping, enforcing consistency whenever a source tensor is revisited.
+% If recursion terminates without conflict, the resulting mapping is a valid match.
+
+% \subsection{Substitution Application}
+
+% %TODO: explain the application system
+
+% The rewrite system must be expressive enough to derive substitutions that TASO proves through SMT solving.
+
+% Our application system therefore handles the following cases:
+% \begin{itemize}
+% \item \textbf{Surjective variable matching.} For example, \texttt{matmul(x, y)} in the source pattern should match \texttt{matmul(x, x)}.
+% \item \textbf{Occurrence-based rewriting.} For example, given \texttt{matmul(x, x)}, the system should be able to rewrite to \texttt{matmul(x, x.T.T)} (i.e., only one occurrence of \texttt{x} is rewritten, not the entire node).
+% \item \textbf{Input/output aliasing.} Substitutions where input and output are aliased must be handled correctly. For example, \texttt{x.T.T -> x} should apply correctly even when aliasing occurs.
+% \item \textbf{Subgraph-local matching.} A pattern must be able to match any subgraph. For example, \texttt{x.T.T} should be applicable even when \texttt{x} is not a graph input and \texttt{x.T.T} is not a graph output.
+% \item \textbf{Dangling-expression cleanup.} The system must handle dangling expressions cleanly after rewriting.
+% \end{itemize}
+
+% The application system is implemented as follows:
+% %TODO add
+
+% \subsection{Search}
+
+% Our objective in search is the following: for a given TASO substitution, find a sequence of axiom applications that transforms the source graph of the substitution into a graph that is structurally equivalent to its destination graph.
+
+% A naive approach is to run BFS from the source graph while applying all axioms until the destination graph is reached. However, this is infeasible in practice because the number of reachable graphs grows exponentially with the search depth.
+
+% With the exception of two split axioms (\texttt{split0(concat(x,y)) -> x} and \texttt{split1(concat(x,y)) -> y}, which remove tensors), all axioms are invertible. This enables a more efficient strategy: bidirectional BFS. We run one search forward from the source using all axioms, and one search backward from the destination using inverse applications of invertible axioms. The search terminates when we find a graph reachable from both directions.
+
+% \subsection{Graph Canonicalization}
+
+% During search, we must quickly determine whether two graphs are equivalent. To do so, we apply the following canonicalization steps:
+% \begin{itemize}
+% \item Remove common subexpressions.
+% \item Remove unused tensors (except inputs and outputs, which must always be preserved).
+% \item Canonically rename tensor variables so that structurally equivalent graphs receive identical names.
+% \end{itemize}
+
+% Note that term graphs have ordered incoming edges, which makes isomorphism-style checks easier than for arbitrary graphs.
+
 
 \section{Approach and Implementation}
-\subsection{IR}
+\label{sec:approach}
 
-The core data structure of the IR is the `Graph` type, which is a set of bindings between tensor variables and expressions, expressed an SSA-style term graph.
-Each expression represents some operator which takes in both tensor variables and non-tensor terms (such as scalars, strides, ...) as inputs, and produces a single tensor as output.
-The non tensor terms can be both variables or specific concrete values.
-`Input` and `Output` are special operators, which denote which tensor vairables are inputs and outputs of the graph.
+\subsection{Graph IR and Substitutions}
 
-The following is a possible graph expressible in the IR:
+We represent computation graphs using a symbolic graph intermediate representation. A graph is a set of bindings from tensor variables to expressions, with one defining expression per tensor. Expressions range over the TASO operators, such as \texttt{MatMul}, \texttt{Conv2D}, \texttt{Transpose}, \texttt{Concat}, and \texttt{Split}, together with non-tensor parameters such as scalars, axes, kernels, strides, padding modes, and activation modes. Inputs are represented by a distinguished \texttt{Input} expression, and outputs are made explicit using \texttt{Output} nodes.
 
-\begin{verbatim}
-x = Input()
-y = Transpose(x)
-z = Mul(y, alpha)
-w = MatMul(y, z)
-o = Output(w)
-\end{verbatim}
+A substitution consists of a source graph, a destination graph, and explicit correspondences between the two sides: a bijection between input tensors, a bijection between symbolic non-tensor variables, and a mapping between outputs. This is enough to represent both ordinary rewrites and rewrites where the destination output is simply one of the destination inputs, such as \texttt{transpose(transpose(x)) \(\to\) x}. Figure~\ref{fig:axiom-matmul-factor} shows one example substitution in our representation.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-  >=Latex,
-  node distance=5mm and 10mm,
-  tensor/.style={draw, circle, minimum size=8mm, inner sep=0pt},
-  op/.style={draw, rounded corners, minimum width=16mm, minimum height=7mm, align=center},
-  term/.style={draw, ellipse, minimum width=11mm, minimum height=7mm, inner sep=1pt}
-]
-\node[tensor] (x) {$x$};
-\node[op, below=of x] (transpose) {Transpose};
-\node[tensor, below=of transpose] (y) {$y$};
-
-\node[op, below left=15mm and 13mm of y] (mul) {Mul};
-% \node[term, left=of mul] (alpha) {$\alpha$};
-\node[tensor, below=of mul] (z) {$z$};
-
-\node[op, below right=15mm and 13mm of y] (matmul) {MatMul};
-\node[tensor, below=of matmul] (w) {$w$};
-
-\node[op, below=of w] (output) {Output};
-\node[tensor, below=of output] (o) {$o$};
-
-\draw[->] (x) -- (transpose);
-\draw[->] (transpose) -- (y);
-\draw[->] (y) -- (mul);
-% \draw[->] (alpha) -- (mul);
-\draw[->] (mul) -- (z);
-\draw[->] (y) -- (matmul);
-\draw[->] (z) -- (matmul);
-\draw[->] (matmul) -- (w);
-\draw[->] (w) -- (output);
-\draw[->] (output) -- (o);
-\end{tikzpicture}
-\label{fig:ir-example}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{axiom_matmul_factor_figure.png}
+  \caption{Example substitution represented as a source graph and a destination graph.}
+  \label{fig:axiom-matmul-factor}
 \end{figure}
 
-\subsection{Axioms}
+\subsection{Matching and Application}
 
-Axioms are encoded as substitutions between two graphs: a source graph (the LHS of the substitution) and a destination graph (the RHS of the substitution).
-This representation alone is not sufficient, because we must also specify how boundary tensors (the inputs and outputs of the graph) correspond across the two sides.
-Each axiom therefore additionally stores a bijection between source and destination inputs, and a bijection between source and destination outputs.
+Given a substitution and a target graph, we first enumerate all matches of the source graph inside the target. Matching starts from a source output tensor and a candidate target tensor, and then recursively compares the two producer expressions. Source inputs may match arbitrary target tensors, but internal source tensors must match target tensors produced by the same operator with compatible arguments. Symbolic parameters are matched in a sort-correct way, so a scalar variable can bind to a scalar literal or scalar expression, an axis variable to an axis term, and so on. A successful match records both a tensor map and a symbolic term map.
 
-For example, consider the substitution
-\[
-\forall x,y,z.\;
-\mathsf{EwAdd}(\mathsf{MatMul}(x,y), \mathsf{MatMul}(x,z))
-=
-\mathsf{MatMul}(x,\mathsf{EwAdd}(y,z)).
-\]
-Here $x,y,z$ are input tensors, \texttt{MatMul} denotes matrix multiplication, and \texttt{EwAdd} denotes element-wise addition.
+The tensor map is not required to be injective. This lets a source pattern such as \texttt{matmul(x,y)} match a target such as \texttt{matmul(x,x)}. This is important in practice, since several TASO substitutions rely on such surjective matches.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-  >=Latex,
-  tensor/.style={draw, circle, minimum size=8mm, inner sep=0pt},
-  op/.style={draw, rounded corners, minimum width=18mm, minimum height=8mm, align=center}
-]
-\node at (-33mm, 22mm) {\textbf{src}};
-\node[tensor] (xL) at (-48mm, 12mm) {$x$};
-\node[tensor] (yL) at (-34mm, 12mm) {$y$};
-\node[tensor] (zL) at (-18mm, 12mm) {$z$};
-\node[op] (mm1L) at (-42mm, -2mm) {MatMul};
-\node[op] (mm2L) at (-24mm, -2mm) {MatMul};
-\node[op] (addL) at (-33mm, -17mm) {EwAdd};
-\node[tensor] (outL) at (-33mm, -31mm) {$out$};
-\draw[->] (xL) -- (mm1L);
-\draw[->] (yL) -- (mm1L);
-\draw[->] (xL) -- (mm2L);
-\draw[->] (zL) -- (mm2L);
-\draw[->] (mm1L) -- (addL);
-\draw[->] (mm2L) -- (addL);
-\draw[->] (addL) -- (outL);
+Once a match has been found, we instantiate the destination side using the symbolic bindings from the match and connect its inputs to the corresponding tensors in the target graph. If the destination output is already one of those inputs, the rewrite is just a redirection. Otherwise, we insert a fresh copy of the destination fragment into the target graph and redirect the consumers of the matched source output to the new result.
 
-\node at (0mm, -6mm) {$\Longrightarrow$};
-
-\node at (33mm, 22mm) {\textbf{dst}};
-\node[tensor] (xR) at (20mm, 12mm) {$x$};
-\node[tensor] (yR) at (34mm, 12mm) {$y$};
-\node[tensor] (zR) at (48mm, 12mm) {$z$};
-\node[op] (addR) at (41mm, -2mm) {EwAdd};
-\node[op] (mmR) at (28mm, -17mm) {MatMul};
-\node[tensor] (outR) at (28mm, -31mm) {$out$};
-\draw[->] (yR) -- (addR);
-\draw[->] (zR) -- (addR);
-\draw[->] (xR) -- (mmR);
-\draw[->] (addR) -- (mmR);
-\draw[->] (mmR) -- (outR);
-\end{tikzpicture}
-\label{fig:axiom-matmul-factor}
-\end{figure}
-
-\subsection{Substitution Matching}
-
-Graph rewriting has two components: matching and application.
-In the matching phase, we are given a target graph and a substitution, and we enumerate all valid occurrences of the substitution source inside the target.
-Each successful match is represented as a surjective mapping from tensors in the substitution source graph to tensors in a target subgraph.
-
-Matching starts by pairing an output tensor of the substitution source with a candidate tensor in the target graph.
-We then recursively expand this pair under the following rules:
-\begin{itemize}
-\item If the source tensor is an input tensor, matching succeeds immediately (it may bind to either an input or an internal tensor in the target).
-\item If the source tensor is internal but the target tensor is an input tensor, matching fails.
-\item If both tensors are internal, their producing expressions must agree (same operator and compatible arguments). If they do not agree, matching fails.
-\item If the expressions agree, we recursively match each corresponding pair of operand tensors.
-\end{itemize}
-During this recursion we maintain and extend a partial match mapping, enforcing consistency whenever a source tensor is revisited.
-If recursion terminates without conflict, the resulting mapping is a valid match.
-
-\subsection{Substitution Application}
-
-%TODO: explain the application system
-
-The rewrite system must be expressive enough to derive substitutions that TASO proves through SMT solving.
-
-Our application system therefore handles the following cases:
-\begin{itemize}
-\item \textbf{Surjective variable matching.} For example, \texttt{matmul(x, y)} in the source pattern should match \texttt{matmul(x, x)}.
-\item \textbf{Occurrence-based rewriting.} For example, given \texttt{matmul(x, x)}, the system should be able to rewrite to \texttt{matmul(x, x.T.T)} (i.e., only one occurrence of \texttt{x} is rewritten, not the entire node).
-\item \textbf{Input/output aliasing.} Substitutions where input and output are aliased must be handled correctly. For example, \texttt{x.T.T -> x} should apply correctly even when aliasing occurs.
-\item \textbf{Subgraph-local matching.} A pattern must be able to match any subgraph. For example, \texttt{x.T.T} should be applicable even when \texttt{x} is not a graph input and \texttt{x.T.T} is not a graph output.
-\item \textbf{Dangling-expression cleanup.} The system must handle dangling expressions cleanly after rewriting.
-\end{itemize}
-
-The application system is implemented as follows:
-%TODO add
+A key point is that rewriting is occurrence-local. If a tensor appears multiple times in the surrounding graph, we can rewrite only one occurrence rather than all of them at once. For example, starting from \texttt{matmul(x,x)}, the system can produce \texttt{matmul(x,transpose(transpose(x)))} by rewriting only one use of \texttt{x}. After each rewrite, we remove any now-unused bindings. This allows substitutions to apply to arbitrary subgraphs, not just to whole-graph inputs and outputs.
 
 \subsection{Search}
 
-Our objective in search is the following: for a given TASO substitution, find a sequence of axiom applications that transforms the source graph of the substitution into a graph that is structurally equivalent to its destination graph.
+For a target TASO substitution \(L \to R\), our goal is to find an explicit derivation from one side to the other. A naive forward breadth-first search quickly becomes infeasible, since the number of reachable graphs grows rapidly with depth.
 
-A naive approach is to run BFS from the source graph while applying all axioms until the destination graph is reached. However, this is infeasible in practice because the number of reachable graphs grows exponentially with the search depth.
+Most of the axioms in our system are invertible, with only a small number of exceptions such as the split rules that delete tensors. This makes meet-in-the-middle search natural. In one orientation, we search forward from \(L\) using the full substitution set and backward from \(R\) using inverse applications of the invertible substitutions. The search stops when the two frontiers meet. If this orientation fails, we also try the reverse direction, since some substitutions are easier to recover starting from the right-hand side. In both cases we record parent pointers, so when a meeting point is found we can reconstruct the full derivation trace rather than only report reachability.
 
-With the exception of two split axioms (\texttt{split0(concat(x,y)) -> x} and \texttt{split1(concat(x,y)) -> y}, which remove tensors), all axioms are invertible. This enables a more efficient strategy: bidirectional BFS. We run one search forward from the source using all axioms, and one search backward from the destination using inverse applications of invertible axioms. The search terminates when we find a graph reachable from both directions.
+In addition to the base axioms, our search uses a small set of derived lemmas. These are not introduced as new semantic primitives, but as proof-shortening rules that make long derivations reachable under a bounded search budget. This is consistent with TASO itself, which also introduces lemma-style shortcuts during verification for some cases. In our experiments, the search is bounded by \texttt{maxDepth = 5} and \texttt{maxNumSteps = 12000}.
 
-\subsection{Graph Canonicalization}
+\subsection{Canonicalization}
 
-During search, we must quickly determine whether two graphs are equivalent. To do so, we apply the following canonicalization steps:
-\begin{itemize}
-\item Remove common subexpressions.
-\item Remove unused tensors (except inputs and outputs, which must always be preserved).
-\item Canonically rename tensor variables so that structurally equivalent graphs receive identical names.
-\end{itemize}
+During search, many generated graphs differ only by tensor naming or by redundant intermediate bindings. To avoid exploring the same state repeatedly, we canonicalize every generated graph before inserting it into the search frontier. Canonicalization performs common subexpression elimination, removes bindings not reachable from the outputs, and then renames the remaining tensors deterministically. Search therefore compares graphs by their canonical forms rather than by their original names.
 
-Note that term graphs have ordered incoming edges, which makes isomorphism-style checks easier than for arbitrary graphs.
+% \section{Results}
 
-\section{Results}
-
-Overal, we are able to recover XXX/576 of all the TASO substitutions.
+% Overal, we are able to recover XXX/576 of all the TASO substitutions.
 
 % TODO: add table where we show how many steps is take to get from one graph to the other, and some other empirical results.
 
+\section{Results}
+\label{sec:results}
+
+We evaluated our system on 444 non-isomorphic substitutions extracted from the TASO implementation. A substitution was counted as recovered if our bounded meet-in-the-middle search found an explicit derivation trace connecting its two sides in either orientation. Throughout these experiments, we used \texttt{maxDepth = 5} and \texttt{maxNumSteps = 12000}.
+
+Under this search configuration, our system recovered 432 of the 444 substitutions, or $97.3\%$. This suggests that the large majority of TASO's discovered substitutions are already obtainable as explicit compositions of the underlying axiom set. In addition, the recovered derivations were typically short. Across all 432 recovered substitutions, the mean derivation length was 2.2 steps, the median was 2, and the maximum was 6.
+
+Table~\ref{tab:deriv-stats} summarizes the distribution of derivation lengths. Most recovered substitutions required only two rewrite steps, and only a small number required more than four. This indicates that, for most of the substitution set, the axioms do not merely imply the desired rewrites in principle, but do so through relatively short derivations.
+
+\begin{table}[t]
+\centering
+\caption{Distribution of derivation lengths for recovered substitutions.}
+\label{tab:deriv-stats}
+\begin{tabular}{r|r}
+\textbf{Steps} & \textbf{Count} \\
+\hline
+0 & 27 \\
+1 & 67 \\
+2 & 205 \\
+3 & 77 \\
+4 & 41 \\
+5 & 13 \\
+6 & 2 \\
+\end{tabular}
+\end{table}
+
+The longest recovered derivations had length 6. These occurred for substitutions 155 and 308. Even these cases remained well within the search bound, while the typical substitution was recovered after only a very small number of rewrite applications.
+
+% \section{Discussion, Limitations, and Next Steps}
+
+% The major surprise was
+
+% \subsection{Case Study}
+
+% \paragraph{Transpose(I) $\rightarrow$ I.}
+% Surprisingly, this test was initially failing due to an overly tight search budget. It turns out that this substitution, while derivable under the current axiom set, is more complicated than initially anticipated.
+
+% \noindent\textbf{Axioms used for the derivation.}
+% \begin{itemize}
+% \item \texttt{axiom26: matmul(x, I) -> x}
+% \item \texttt{axiom9: transpose(transpose(x)) -> x}
+% \item \texttt{axiom16: transpose(matmul(x, y)) ->}\\
+% \texttt{\hspace*{1.5em}matmul(transpose(y), transpose(x))}
+% \end{itemize}
+
+% \noindent In the traces below, \texttt{inv(axiom k)} means that \texttt{axiom k} is applied in the reverse direction.
+
+% \noindent\textbf{Proof trace for \texttt{transpose(I) -> I}.}
+% \begin{quote}
+% \footnotesize\ttfamily
+% (0) transpose(I) [start]\\
+% (1) matmul(transpose(I), I) [inv(axiom26)]\\
+% (2) matmul(transpose(I),\\
+% \hspace*{1.8em}transpose(transpose(I))) [inv(axiom9)]\\
+% (3) transpose(matmul(transpose(I),\\
+% \hspace*{1.8em}I)) [inv(axiom16)]\\
+% (4) transpose(transpose(I)) [axiom26]\\
+% (5) I [axiom9]
+% \end{quote}
+
+% \noindent\textbf{Analogous trace for \texttt{matmul(I, x) -> x}.}
+% \begin{quote}
+% \footnotesize\ttfamily
+% (0) matmul(I, x) [start]\\
+% (1) matmul(transpose(transpose(I)),\\
+% \hspace*{1.8em}x) [inv(axiom9)]\\
+% (2) matmul(transpose(transpose(I)),\\
+% \hspace*{1.8em}transpose(transpose(x))) [inv(axiom9)]\\
+% (3) transpose(matmul(transpose(x),\\
+% \hspace*{1.8em}transpose(I))) [inv(axiom16)]\\
+% (4) transpose(matmul(transpose(x), I)) [lemma: transpose(I) -> I]\\
+% (5) transpose(transpose(x)) [axiom26]\\
+% (6) x [axiom9]
+% \end{quote}
+
+% Note that the second derivation uses \texttt{transpose(I) -> I} as a lemma, making even the shortest proof several rewrites long.
+
+% Surprisingly, the TASO team converged on the same issue and added \texttt{Transpose(X) -> X} as a lemma when performing SMT verification for their rewrites. We adopt the same solution and enhance the axiom set with the lemmas provided by TASO.
+
+% Interestingly, this suggests that the ``distance'' in rewrite space and the ``distance'' in SMT proof space are closely correlated.
+
 \section{Discussion, Limitations, and Next Steps}
+\label{sec:discussion}
 
-The major surprise was
+Our results suggest that the large majority of TASO's discovered substitutions are already derivable from a comparatively small axiom basis. This supports the view that much of TASO's substitution library is structured rather than ad hoc: many of its rewrites behave more like derived lemmas than like unrelated primitive rules. At the same time, our results concern bounded recoverability rather than unrestricted derivability, so they should be interpreted through the lens of the search procedure used in our experiments.
 
-\subsection{Case Study}
+\subsection{Case Study: \texttt{transpose(I) \(\to\) I}}
 
-\paragraph{Transpose(I) $\rightarrow$ I.}
-Surprisingly, this test was initially failing due to an overly tight search budget. It turns out that this substitution, while derivable under the current axiom set, is more complicated than initially anticipated.
+One instructive example is the substitution \texttt{transpose(I) \(\to\) I}. Although the result is semantically simple, it is surprisingly nontrivial to recover by explicit rewriting. Under our rewrite system, one derivation is:
 
-\noindent\textbf{Axioms used for the derivation.}
-\begin{itemize}
-\item \texttt{axiom26: matmul(x, I) -> x}
-\item \texttt{axiom9: transpose(transpose(x)) -> x}
-\item \texttt{axiom16: transpose(matmul(x, y)) ->}\\
-\texttt{\hspace*{1.5em}matmul(transpose(y), transpose(x))}
-\end{itemize}
-
-\noindent In the traces below, \texttt{inv(axiom k)} means that \texttt{axiom k} is applied in the reverse direction.
-
-\noindent\textbf{Proof trace for \texttt{transpose(I) -> I}.}
 \begin{quote}
 \footnotesize\ttfamily
 (0) transpose(I) [start]\\
 (1) matmul(transpose(I), I) [inv(axiom26)]\\
-(2) matmul(transpose(I),\\
-\hspace*{1.8em}transpose(transpose(I))) [inv(axiom9)]\\
-(3) transpose(matmul(transpose(I),\\
-\hspace*{1.8em}I)) [inv(axiom16)]\\
+(2) matmul(transpose(I), transpose(transpose(I))) [inv(axiom9)]\\
+(3) transpose(matmul(transpose(I), I)) [inv(axiom16)]\\
 (4) transpose(transpose(I)) [axiom26]\\
 (5) I [axiom9]
 \end{quote}
 
-\noindent\textbf{Analogous trace for \texttt{matmul(I, x) -> x}.}
-\begin{quote}
-\footnotesize\ttfamily
-(0) matmul(I, x) [start]\\
-(1) matmul(transpose(transpose(I)),\\
-\hspace*{1.8em}x) [inv(axiom9)]\\
-(2) matmul(transpose(transpose(I)),\\
-\hspace*{1.8em}transpose(transpose(x))) [inv(axiom9)]\\
-(3) transpose(matmul(transpose(x),\\
-\hspace*{1.8em}transpose(I))) [inv(axiom16)]\\
-(4) transpose(matmul(transpose(x), I)) [lemma: transpose(I) -> I]\\
-(5) transpose(transpose(x)) [axiom26]\\
-(6) x [axiom9]
-\end{quote}
+This case illustrates an important feature of the search space induced by the axioms. Even substitutions that appear immediate at the semantic level may lie several rewrite steps away when expressed only through primitive rules. In practice, this is one reason that a small set of derived lemmas is useful for bounded search: such lemmas do not change what is semantically derivable, but can greatly shorten the path needed to recover it.
 
-Note that the second derivation uses \texttt{transpose(I) -> I} as a lemma, making even the shortest proof several rewrites long.
+% A closely related example is \texttt{matmul(I, x) \(\to\) x}, whose shortest derivation in our system naturally builds on \texttt{transpose(I) \(\to\) I} as an intermediate fact:
 
-Surprisingly, the TASO team converged on the same issue and added \texttt{Transpose(X) -> X} as a lemma when performing SMT verification for their rewrites. We adopt the same solution and enhance the axiom set with the lemmas provided by TASO.
+% \begin{quote}
+% \footnotesize\ttfamily
+% (0) matmul(I, x) [start]\\
+% (1) matmul(transpose(transpose(I)), x) [inv(axiom9)]\\
+% (2) matmul(transpose(transpose(I)), transpose(transpose(x))) [inv(axiom9)]\\
+% (3) transpose(matmul(transpose(x), transpose(I))) [inv(axiom16)]\\
+% (4) transpose(matmul(transpose(x), I)) [lemma: transpose(I) -> I]\\
+% (5) transpose(transpose(x)) [axiom26]\\
+% (6) x [axiom9]
+% \end{quote}
 
-Interestingly, this suggests that the ``distance'' in rewrite space and the ``distance'' in SMT proof space are closely correlated.
+\subsection{Case Study: Currently Unrecovered Substitution}
+
+\textit{[Add unrecovered case study here.]}
+
+
+\subsection{Next Steps}
+
+The first next step is to analyze the remaining unrecovered substitutions in more detail. At present, they may reflect bounded-search limitations, missing lemmas, or genuine gaps in the current axiom set. Distinguishing among these possibilities would sharpen the interpretation of the current recovery rate.
+
+A second next step is to connect derivability back to optimization performance. If most of TASO's discovered substitutions can already be generated from the base axioms, then a natural systems question is whether one can optimize graphs effectively using the rewrite system itself rather than first materializing a larger substitution library. A direct comparison between optimization driven by explicit axiom rewriting and optimization driven by TASO's precomputed substitutions would therefore be a valuable follow-up.
+
+
+
+
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{refs}
 
