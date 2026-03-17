@@ -83,8 +83,6 @@ mkSubstitution srcBindings dstBindings inputPairs varPairs outputPairs = do
   guard (all (`Bi.memberR` inMap) (Set.toList unmappedDstOuts))
   pure (Substitution srcGraph dstGraph inMap varMap outMap)
 
--- Convenience: single-output substitution where inputs share names
--- and variables are auto-inferred (same as the old mustAxiom)
 mustSub :: [(Tensor, Expr)] -> [(Tensor, Expr)] -> (Tensor, Tensor) -> Substitution
 mustSub srcBindings dstBindings (srcOut, dstOut) =
   require "Invalid substitution (mustSub)" $ do
