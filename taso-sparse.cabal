@@ -26,7 +26,6 @@ library
         Search
         Short
         Substitutions.Apply
-        Substitutions.Apply2
         TASO
         Substitutions.Match
         Substitutions.Substitution

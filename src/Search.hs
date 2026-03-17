@@ -16,7 +16,7 @@ import Data.Maybe (isJust)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import IR.Graph (Graph, canonicalizeGraph)
-import Substitutions.Apply2 (applySubstitution)
+import Substitutions.Apply (applySubstitution)
 import Substitutions.Substitution (Substitution)
 
 data SearchConfig = SearchConfig

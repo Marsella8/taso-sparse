@@ -7,7 +7,7 @@ import Data.List (sort)
 import IR.Graph (Graph, mustGraph, canonicalizeGraph)
 import IR.IR
 import Short
-import Substitutions.Apply2 (applySubstitution, applyMatchedSubstitution)
+import Substitutions.Apply (applySubstitution, applyMatchedSubstitution)
 import Substitutions.Match (Match(..))
 import Axioms (axiom9, axiom28, axiom29)
 import Substitutions.Substitution (mustSub, invertSubstitution)
