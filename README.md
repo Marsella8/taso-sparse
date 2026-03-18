@@ -1,4 +1,4 @@
-Ok so the IR is currently cooked. Right now we represent it as a tree of expressions. Problems:
+<!-- Ok so the IR is currently cooked. Right now we represent it as a tree of expressions. Problems:
 1. Some expressions have common subexpressions..
 Consider:
 (x, y tensors, s1, s2 scalar)
@@ -87,4 +87,6 @@ THere is this weird asymmetry between:
 - All the exprs are tensors, but
 - When matching, we have to map each variable to each other variable.
 
-So like why say for something like Scalar, don't we also need to store the entire expression and instead just have it as a (possibly nested) arguent to one of the tensor exprs? Because there is never a case in which a scalar that is not a var is shared by 2 expressions, so we dont really need to store it as a DAG: storing it as a tree suffices.
+So like why say for something like Scalar, don't we also need to store the entire expression and instead just have it as a (possibly nested) arguent to one of the tensor exprs? Because there is never a case in which a scalar that is not a var is shared by 2 expressions, so we dont really need to store it as a DAG: storing it as a tree suffices. -->
+
+Read me

@@ -391,17 +391,18 @@ At the same time, our results concern bounded recoverability rather than unrestr
 
 One instructive example is the substitution \texttt{transpose(I) \(\to\) I}. Although the result is semantically simple, it is surprisingly nontrivial to recover by explicit rewriting. The derivation uses three primitive axioms:
 
-\begin{itemize}
-\item \texttt{axiom26: matmul(x, I) \(\to\) x}
-\item \texttt{axiom9: transpose(transpose(x)) \(\to\) x}
-\item \texttt{axiom16: transpose(matmul(x, y)) \(\to\)}\\
-\texttt{\hspace*{1.5em}matmul(transpose(y), transpose(x))}
-\end{itemize}
+\begin{quote}
+  \small\ttfamily
+  axiom26: matmul(x, I) $\rightarrow$ x\\
+  axiom9: transpose(transpose(x)) $\rightarrow$ x\\
+  axiom16: transpose(matmul(x, y)) $\rightarrow$\\
+  \hspace*{1.5em}matmul(transpose(y), transpose(x))
+  \end{quote}
 
 Here \texttt{inv(axiom k)} denotes applying \texttt{axiom k} in the reverse direction. Under our rewrite system, one derivation is:
 
 \begin{quote}
-\footnotesize\ttfamily
+\small\ttfamily
 (0) transpose(I) [start]\\
 (1) matmul(transpose(I), I) [inv(axiom26)]\\
 (2) matmul(transpose(I), transpose(transpose(I))) [inv(axiom9)]\\
@@ -430,7 +431,7 @@ Interestingly, this lemma was independently discovered by the TASO team when per
 
 One representative unrecovered substitution is the following multi-output transpose--split axis-swap rule:
 \begin{quote}
-\footnotesize\ttfamily
+\small\ttfamily
 (split0\_0(transpose(concat\_1(X,Y))),\\
 \hspace*{1.5em}split1\_0(transpose(concat\_1(X,Y))))\\
 $\rightarrow$\\
@@ -451,7 +452,7 @@ A natural next step is to analyze the remaining unrecovered substitutions in mor
 Another next step is to connect derivability back to optimization performance. If most of TASO's discovered substitutions can already be generated from the base axioms, then a natural question is whether one can optimize graphs effectively using the rewrite system itself rather than first materializing and verifying the larger substitution library, which would be a significant simplification. A direct comparison between optimization driven by explicit axiom rewriting and optimization driven by TASO's precomputed substitutions would therefore be a valuable follow-up.
 
 
-
+\newpage
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{refs}
 
